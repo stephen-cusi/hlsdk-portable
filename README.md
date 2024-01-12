@@ -76,11 +76,11 @@ git clone --recursive https://github.com/FWGS/hlsdk-portable
 
 # Build Instructions
 
-## Windows
+## Windows x86.
 
 ### Prerequisites
 
-Install and run [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/). The installer allows you to choose specific components. Select `Desktop development with C++`. You can untick everything you don't need in Installation details, but you must keep `MSVC` ticked. You may also keep `C++ CMake tools for Windows` ticked as you'll need **cmake**. Alternatively you can install **cmake** from the [cmake.org](https://cmake.org/download/) and during installation tick *Add to the PATH...*.
+Install and run [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/). The installer allows you to choose specific components. Select `Desktop development with C++`. You can untick everything you don't need in Installation details, but you must keep `MSVC` and corresponding Windows SDK (e.g. Windows 10 SDK or Windows 11 SDK) ticked. You may also keep `C++ CMake tools for Windows` ticked as you'll need **cmake**. Alternatively you can install **cmake** from the [cmake.org](https://cmake.org/download/) and during installation tick *Add to the PATH...*.
 
 ### Opening command prompt
 
@@ -131,7 +131,7 @@ cmake -G "Visual Studio 16 2019" -A Win32 -B build
 
 After the configuration step, `HLSDK-PORTABLE.sln` should appear in the `build` directory. You can open this solution in Visual Studio and continue developing there.
 
-## Windows. Using Microsoft Visual Studio 6
+## Windows x86. Using Microsoft Visual Studio 6
 
 Microsoft Visual Studio 6 is very old, but if you still have it installed, you can use it to build this hlsdk. There are no project files, but two `.bat` files, for server and client libraries. They require variable **MSVCDir** to be set to the installation path of Visual Studio:
 
@@ -142,7 +142,7 @@ cd dlls && compile.bat && cd ../cl_dll && compile.bat
 
 `hl.dll` and `client.dll` will appear in `dlls/` and `cl_dll/` diretories. The libraries built with msvc6 should be compatible with Windows XP.
 
-## Linux. Using Steam Runtime in chroot
+## Linux x86. Portable steam-compatible build using Steam Runtime in chroot
 
 ### Prerequisites
 
@@ -168,7 +168,7 @@ schroot --chroot steamrt_scout_i386 -- cmake -B build-in-steamrt -S .
 schroot --chroot steamrt_scout_i386 -- cmake --build build-in-steamrt
 ```
 
-## Linux. Build without Steam Runtime
+## Linux x86. Portable steam-compatible build without Steam Runtime
 
 ### Prerequisites
 
@@ -186,11 +186,18 @@ cmake --build build
 
 Note that the libraries built this way might be not compatible with Steam Half-Life. If you have such issue you can configure it to build statically with c++ and gcc libraries:
 ```
-cmake .. -DCMAKE_C_FLAGS="-static-libstdc++ -static-libgcc"
+cd build
+cmake .. -DCMAKE_CXX_FLAGS="-static-libstdc++ -static-libgcc"
+```
+
+Alternatively, you can avoid libstdc++/libgcc_s linking using small libsupc++ library and optimization build flags instead:
+```
+cd build
+cmake .. -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=gcc -DCMAKE_C_FLAGS="-O3" -DCMAKE_CXX_FLAGS="-O3 -lsupc++"
 ```
 To ensure portability it's still better to build using Steam Runtime or another chroot of some older distro.
 
-## Linux. Build in your own chroot
+## Linux x86. Portable steam-compatible build in your own chroot
 
 ### Prerequisites
 
@@ -234,16 +241,98 @@ schroot --chroot jessie -- cmake --build build-in-chroot
 ```
 
 ## Android
+1. Set up [Android Studio/Android SDK](https://developer.android.com/studio).
 
-TODO
+### Android Studio
+Open the project located in the `android` folder and build.
 
-## Other platforms
+### Command-line
+```
+cd android
+./gradlew assembleRelease
+```
 
-Building on other Unix-like platforms (e.g. FreeBSD) is supported.
+### Customizing the build
+settings.gradle:
+* **rootProject.name** - project name displayed in Android Studio (optional).
+
+app/build.gradle:
+* **android->namespace** and **android->defaultConfig->applicationId** - set both to desired package name.
+* **getBuildNum** function - set **releaseDate** variable as desired.
+
+app/java/su/xash/hlsdk/MainActivity.java:
+* **.putExtra("gamedir", ...)** - set desired gamedir.
+
+src/main/AndroidManifest.xml:
+* **application->android:label** - set desired application name.
+* **su.xash.engine.gamedir** value - set to same as above.
+
+## Nintendo Switch
 
 ### Prerequisites
 
-Install C and C++ compilers (like gcc or clang), cmake and make (or gmake)
+1. Set up [`dkp-pacman`](https://devkitpro.org/wiki/devkitPro_pacman).
+2. Install dependency packages:
+```
+sudo dkp-pacman -S switch-dev dkp-toolchain-vars switch-mesa switch-libdrm_nouveau switch-sdl2
+```
+3. Make sure the `DEVKITPRO` environment variable is set to the devkitPro SDK root:
+```
+export DEVKITPRO=/opt/devkitpro
+```
+4. Install libsolder:
+```
+source $DEVKITPRO/switchvars.sh
+git clone https://github.com/fgsfdsfgs/libsolder.git
+make -C libsolder install
+```
+
+### Building using CMake
+```
+mkdir build && cd build
+aarch64-none-elf-cmake -G"Unix Makefiles" -DCMAKE_PROJECT_HLSDK-PORTABLE_INCLUDE="$DEVKITPRO/portlibs/switch/share/SolderShim.cmake" ..
+make -j
+```
+
+### Building using waf
+```
+./waf configure -T release --nswitch
+./waf build
+```
+
+## PlayStation Vita
+
+### Prerequisites
+
+1. Set up [VitaSDK](https://vitasdk.org/).
+2. Install [vita-rtld](https://github.com/fgsfdsfgs/vita-rtld):
+   ```
+   git clone https://github.com/fgsfdsfgs/vita-rtld.git && cd vita-rtld
+   mkdir build && cd build
+   cmake -DCMAKE_BUILD_TYPE=Release ..
+   make -j2 install
+   ```
+
+### Building with waf:
+```
+./waf configure -T release --psvita
+./waf build
+```
+
+### Building with CMake:
+```
+mkdir build && cd build
+cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake" -DCMAKE_PROJECT_HLSDK-PORTABLE_INCLUDE="$VITASDK/share/vrtld_shim.cmake" ..
+make -j
+```
+
+## Other platforms
+
+Building on other architectures (e.g x86_64 or arm) and POSIX-compliant OSes (e.g. FreeBSD) is supported.
+
+### Prerequisites
+
+Install C and C++ compilers (like gcc or clang), cmake and make.
 
 ### Building
 
@@ -252,20 +341,33 @@ cmake -B build -S .
 cmake --build build
 ```
 
+Force 64-bit build:
+```
+cmake -D64BIT=1 -B build -S .
+cmake --build build
+```
+
 ### Building with waf
 
 To use waf, you need to install python (2.7 minimum)
 
 ```
-(./waf configure -T release)
-(./waf)
+./waf configure -T release
+./waf
+```
+
+Force 64-bit build:
+```
+./waf configure -T release -8
+./waf
 ```
 
 ## Build options
 
 Some useful build options that can be set during the cmake step.
 
-* **GOLDSOURCE_SUPPORT** - allows to turn off/on the support for GoldSource input. Set to **ON** by default on Windows and Linux, **OFF** on other platforms.
+* **GOLDSOURCE_SUPPORT** - allows to turn off/on the support for GoldSource input. Set to **ON** by default on x86 Windows and x86 Linux, **OFF** on other platforms.
+* **64BIT** - allows to turn off/on 64-bit build. Set to **OFF** by default on x86_64 Windows, x86_64 Linux and 32-bit platforms, **ON** on other 64-bit platforms.
 * **USE_VGUI** - whether to use VGUI library. **OFF** by default. You need to init `vgui_support` submodule in order to build with VGUI.
 
 This list is incomplete. Look at `CMakeLists.txt` to see all available options.
