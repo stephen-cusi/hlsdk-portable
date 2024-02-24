@@ -800,7 +800,6 @@ void CBasePlayer::PackDeadPlayerItems( void )
 
 			iPW++;
 		}
-end:
 		pWeaponBox->pev->velocity = pev->velocity * 1.2f;// weaponbox has player's velocity, then some.
 	}
 	RemoveAllItems( TRUE );// now strip off everything that wasn't handled by the code above.
@@ -1296,7 +1295,7 @@ void CBasePlayer::PlayerDeathThink( void )
 		PackDeadPlayerItems();
 	}
 
-	if( pev->modelindex && ( !m_fSequenceFinished ) && ( pev->deadflag == DEAD_DYING ) )
+	if( pev->modelindex && ( !m_fSequenceFinished ) && ( pev->deadflag == DEAD_DYING ))
 	{
 		StudioFrameAdvance();
 
@@ -1305,20 +1304,20 @@ void CBasePlayer::PlayerDeathThink( void )
 			return;
 	}
 
-	// once we're done animating our death and we're on the ground, we want to set movetype to None so our dead body won't do collisions and stuff anymore
-	// this prevents a bug where the dead body would go to a player's head if he walked over it while the dead player was clicking their button to respawn
-	if( pev->movetype != MOVETYPE_NONE && FBitSet( pev->flags, FL_ONGROUND ) )
-		pev->movetype = MOVETYPE_NONE;
-
 	if( pev->deadflag == DEAD_DYING )
 	{
-		if( g_pGameRules->IsMultiplayer() && pev->movetype == MOVETYPE_NONE )
+		if( g_pGameRules->IsMultiplayer() && m_fSequenceFinished && pev->movetype == MOVETYPE_NONE )
 		{
 			CopyToBodyQue( pev );
 			pev->modelindex = 0;
 		}
 		pev->deadflag = DEAD_DEAD;
 	}
+
+	// once we're done animating our death and we're on the ground, we want to set movetype to None so our dead body won't do collisions and stuff anymore
+	// this prevents a bug where the dead body would go to a player's head if he walked over it while the dead player was clicking their button to respawn
+	if( pev->movetype != MOVETYPE_NONE && FBitSet( pev->flags, FL_ONGROUND ) )
+		pev->movetype = MOVETYPE_NONE;
 
 	StopAnimation();
 
@@ -3340,13 +3339,11 @@ void CBloodSplat::Spray( void )
 {
 	TraceResult tr;	
 
-	if( g_Language != LANGUAGE_GERMAN )
-	{
-		UTIL_MakeVectors( pev->angles );
-		UTIL_TraceLine( pev->origin, pev->origin + gpGlobals->v_forward * 128, ignore_monsters, pev->owner, & tr );
+	UTIL_MakeVectors( pev->angles );
+	UTIL_TraceLine( pev->origin, pev->origin + gpGlobals->v_forward * 128, ignore_monsters, pev->owner, & tr );
 
-		UTIL_BloodDecalTrace( &tr, BLOOD_COLOR_RED );
-	}
+	UTIL_BloodDecalTrace( &tr, BLOOD_COLOR_RED );
+
 	SetThink( &CBaseEntity::SUB_Remove );
 	pev->nextthink = gpGlobals->time + 0.1f;
 }
