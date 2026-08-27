@@ -1,4 +1,4 @@
-if(WIN32)
+if(WIN32 AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM|arm|aarch64|ARM64)$")
 	# Windows XP compatible platform toolset. Must be set before project(),
 	# otherwise change of CMAKE_*_TOOLSET will take no effect.
 	# We get VS version from the generator name because neither MSVC* nor other

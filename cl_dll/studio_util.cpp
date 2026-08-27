@@ -11,7 +11,7 @@
 #include "com_model.h"
 #include "studio_util.h"
 #include "build.h"
-#if XASH_ARM >= 8
+#if XASH_ARM >= 8 && !defined(_MSC_VER)
 #define XASH_SIMD_NEON 1
 #include <arm_neon.h>
 #include "neon_mathfun.h"
