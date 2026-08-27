@@ -11,10 +11,31 @@
 #include "com_model.h"
 #include "studio_util.h"
 #include "build.h"
-#if XASH_ARM >= 8 && !defined(_MSC_VER)
+#if XASH_ARM >= 8
 #define XASH_SIMD_NEON 1
 #include <arm_neon.h>
 #include "neon_mathfun.h"
+#endif
+
+#ifdef _MSC_VER
+static inline float32x4_t xash_vld1q_f32_init(float a, float b, float c, float d)
+{
+	float data[4] = { a, b, c, d };
+	return vld1q_f32(data);
+}
+static inline uint32x4_t xash_vcombine_u32_init(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+	uint32_t lower[2] = { a, b };
+	uint32_t upper[2] = { c, d };
+	return vcombine_u32(vld1_u32(lower), vld1_u32(upper));
+}
+#define XASH_NEON_FLOAT4(a, b, c, d) xash_vld1q_f32_init((a), (b), (c), (d))
+#define XASH_NEON_UINT4(a, b, c, d)  xash_vcombine_u32_init((a), (b), (c), (d))
+#define XASH_NEON_ZERO_F32()         vdupq_n_f32(0.0f)
+#else
+#define XASH_NEON_FLOAT4(a, b, c, d) ((float32x4_t){ (a), (b), (c), (d) })
+#define XASH_NEON_UINT4(a, b, c, d)  ((uint32x4_t){ (a), (b), (c), (d) })
+#define XASH_NEON_ZERO_F32()         ((float32x4_t){ 0.0f })
 #endif
 
 /*
@@ -29,7 +50,8 @@ void ConcatTransforms( float in1[3][4], float in2[3][4], float out[3][4] )
 	float32x4x3_t in1_reg, in2_reg;
 	memcpy(&in1_reg, in1, sizeof(float) * 3 * 4);
 	memcpy(&in2_reg, in2, sizeof(float) * 3 * 4);
-	float32x4x3_t out_reg = {};
+	float32x4x3_t out_reg;
+	memset(&out_reg, 0, sizeof(out_reg));
 
 	out_reg.val[0] = vcopyq_laneq_f32(out_reg.val[0], 3, in1_reg.val[0], 3); // out[0][3] = in[0][3]
 	out_reg.val[0] = vfmaq_laneq_f32(out_reg.val[0], in2_reg.val[0], in1_reg.val[0], 0); // out[0][n] += in2[0][n] * in1[0][0]
@@ -87,7 +109,7 @@ void AngleQuaternion( float *angles, vec4_t quaternion )
 {
 #if XASH_SIMD_NEON
 	static const uint32x4_t AngleQuaternion_sign2 = vzipq_u32(vdupq_n_u32(0x80000000), vdupq_n_u32(0x00000000)).val[0]; // { 0x80000000, 0x00000000, 0x80000000, 0x00000000 };
-	float32x4_t angles_reg = {};
+	float32x4_t angles_reg = XASH_NEON_ZERO_F32();
 	memcpy(&angles_reg, angles, sizeof(float) * 3);
 	float32x4x2_t sr_sp_sy_0_cr_cp_cy_1;
 	sincos_ps(vmulq_n_f32(angles_reg, 0.5), &sr_sp_sy_0_cr_cp_cy_1.val[0], &sr_sp_sy_0_cr_cp_cy_1.val[1]);

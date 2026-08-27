@@ -22,11 +22,35 @@
 #include "const.h"
 #include "build.h"
 
-#if XASH_ARM >= 8 && !defined(_MSC_VER)
+#if XASH_ARM >= 8
 #define XASH_SIMD_NEON 1
 #include <arm_neon.h>
 #include "neon_mathfun.h"
-#endif // XASH_ARM >= 8 && !MSVC
+#endif // XASH_ARM >= 8
+
+#ifdef _MSC_VER
+// MSVC arm_neon.h uses __n128 as the underlying type for NEON vectors,
+// which doesn't support brace initialization like GCC/Clang do.
+// Provide helper macros to construct NEON vectors in a portable way.
+static inline float32x4_t xash_vld1q_f32_init(float a, float b, float c, float d)
+{
+	float data[4] = { a, b, c, d };
+	return vld1q_f32(data);
+}
+static inline uint32x4_t xash_vcombine_u32_init(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+	uint32_t lower[2] = { a, b };
+	uint32_t upper[2] = { c, d };
+	return vcombine_u32(vld1_u32(lower), vld1_u32(upper));
+}
+#define XASH_NEON_FLOAT4(a, b, c, d) xash_vld1q_f32_init((a), (b), (c), (d))
+#define XASH_NEON_UINT4(a, b, c, d)  xash_vcombine_u32_init((a), (b), (c), (d))
+#define XASH_NEON_ZERO_F32()         vdupq_n_f32(0.0f)
+#else
+#define XASH_NEON_FLOAT4(a, b, c, d) ((float32x4_t){ (a), (b), (c), (d) })
+#define XASH_NEON_UINT4(a, b, c, d)  ((uint32x4_t){ (a), (b), (c), (d) })
+#define XASH_NEON_ZERO_F32()         ((float32x4_t){ 0.0f })
+#endif
 
 
 // up / down
@@ -122,12 +146,12 @@ void AngleVectorsTranspose( const vec3_t angles, vec3_t forward, vec3_t right, v
 void AngleMatrix( const float *angles, float (*matrix)[4] )
 {
 #if XASH_SIMD_NEON
-	static const uint32x4_t AngleMatrix_sign0 = { 0x80000000, 0x00000000, 0x00000000, 0x00000000 };
-	static const uint32x4_t AngleMatrix_sign1 = { 0x00000000, 0x80000000, 0x00000000, 0x00000000 };
-	static const uint32x4_t AngleMatrix_sign2 = { 0x00000000, 0x00000000, 0x80000000, 0x00000000 };
+	const uint32x4_t AngleMatrix_sign0 = XASH_NEON_UINT4(0x80000000, 0x00000000, 0x00000000, 0x00000000);
+	const uint32x4_t AngleMatrix_sign1 = XASH_NEON_UINT4(0x00000000, 0x80000000, 0x00000000, 0x00000000);
+	const uint32x4_t AngleMatrix_sign2 = XASH_NEON_UINT4(0x00000000, 0x00000000, 0x80000000, 0x00000000);
 
 	float32x4x3_t out_reg;
-	float32x4_t angles_reg = { angles[0], angles[1], angles[2], 0.0f };
+	float32x4_t angles_reg = XASH_NEON_FLOAT4(angles[0], angles[1], angles[2], 0.0f);
 
 	float32x4x2_t sp_sy_sr_0_cp_cy_cr_1;
 	sincos_ps( vmulq_n_f32( angles_reg, ( M_PI * 2 / 360 )), &sp_sy_sr_0_cp_cy_cr_1.val[0], &sp_sy_sr_0_cp_cy_cr_1.val[1] );
@@ -295,7 +319,7 @@ float AngleBetweenVectors( const vec3_t v1, const vec3_t v2 )
 void VectorTransform( const vec3_t in1, float in2[3][4], vec3_t out )
 {
 #if XASH_SIMD_NEON
-	float32x4_t in1_reg = { in1[0], in1[1], in1[2], 0.0f };
+	float32x4_t in1_reg = XASH_NEON_FLOAT4(in1[0], in1[1], in1[2], 0.0f);
 
 	float32x4x4_t in_t;
 	memcpy( &in_t, in2, sizeof( float ) * 3 * 4 );
@@ -362,7 +386,7 @@ void _VectorCopy( vec3_t in, vec3_t out )
 void CrossProduct( const vec3_t v1, const vec3_t v2, vec3_t cross )
 {
 #if XASH_SIMD_NEON
-	float32x4_t v1_reg = {}, v2_reg = {};
+	float32x4_t v1_reg = XASH_NEON_ZERO_F32(), v2_reg = XASH_NEON_ZERO_F32();
 	memcpy( &v1_reg, v1, sizeof( float ) * 3 );
 	memcpy( &v2_reg, v2, sizeof( float ) * 3 );
 
