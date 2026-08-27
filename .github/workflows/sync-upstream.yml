@@ -1,0 +1,43 @@
+name: Sync upstream
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 每天 UTC 06:00（北京时间 14:00）
+  workflow_dispatch:       # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: master
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Fetch upstream
+      run: |
+        git remote add upstream https://github.com/FWGS/hlsdk-portable.git
+        git fetch upstream master
+
+    - name: Check for new commits
+      id: check
+      run: |
+        LOCAL=$(git rev-parse HEAD)
+        UPSTREAM=$(git rev-parse upstream/master)
+        if [ "$LOCAL" = "$UPSTREAM" ]; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+          echo "Already up to date."
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+          BEHIND=$(git rev-list --count HEAD..upstream/master)
+          echo "Behind by $BEHIND commits."
+        fi
+
+    - name: Merge upstream
+      if: steps.check.outputs.changed == 'true'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git merge upstream/master --no-edit -m "chore: sync with upstream FWGS/hlsdk-portable"
+        git push origin master
