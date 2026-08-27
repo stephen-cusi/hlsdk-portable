@@ -11,14 +11,10 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set developer command prompt for Windows ARM64
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: arm64
-
-    - name: Build with CMake
+    - name: Build with CMake (ARM64)
+      shell: cmd
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="dist"
+        cmake -B build -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_INSTALL_PREFIX="dist"
         cmake --build build --config Release --target all
         cmake --build build --config Release --target install
 
