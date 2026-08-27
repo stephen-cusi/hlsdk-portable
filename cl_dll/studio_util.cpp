@@ -18,12 +18,15 @@
 #endif
 
 #ifdef _MSC_VER
-static inline float32x4_t xash_vld1q_f32_init(float a, float b, float c, float d)
+// MSVC arm_neon.h uses __n128 as the underlying type for NEON vectors,
+// which doesn't support brace initialization like GCC/Clang do.
+// Provide helper functions to construct NEON vectors in a portable way.
+static float32x4_t xash_vld1q_f32_init(float a, float b, float c, float d)
 {
 	float data[4] = { a, b, c, d };
 	return vld1q_f32(data);
 }
-static inline uint32x4_t xash_vcombine_u32_init(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+static uint32x4_t xash_vcombine_u32_init(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
 {
 	uint32_t lower[2] = { a, b };
 	uint32_t upper[2] = { c, d };
