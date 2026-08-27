@@ -28,10 +28,10 @@
 #include "neon_mathfun.h"
 #endif // XASH_ARM >= 8
 
-#ifdef _MSC_VER
+#if XASH_SIMD_NEON && defined(_MSC_VER)
 // MSVC arm_neon.h uses __n128 as the underlying type for NEON vectors,
 // which doesn't support brace initialization like GCC/Clang do.
-// Provide helper macros to construct NEON vectors in a portable way.
+// Provide helper functions to construct NEON vectors in a portable way.
 static float32x4_t xash_vld1q_f32_init(float a, float b, float c, float d)
 {
 	float data[4] = { a, b, c, d };
@@ -46,7 +46,7 @@ static uint32x4_t xash_vcombine_u32_init(uint32_t a, uint32_t b, uint32_t c, uin
 #define XASH_NEON_FLOAT4(a, b, c, d) xash_vld1q_f32_init((a), (b), (c), (d))
 #define XASH_NEON_UINT4(a, b, c, d)  xash_vcombine_u32_init((a), (b), (c), (d))
 #define XASH_NEON_ZERO_F32()         vdupq_n_f32(0.0f)
-#else
+#elif XASH_SIMD_NEON
 #define XASH_NEON_FLOAT4(a, b, c, d) ((float32x4_t){ (a), (b), (c), (d) })
 #define XASH_NEON_UINT4(a, b, c, d)  ((uint32x4_t){ (a), (b), (c), (d) })
 #define XASH_NEON_ZERO_F32()         ((float32x4_t){ 0.0f })
