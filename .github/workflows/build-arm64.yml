@@ -11,12 +11,12 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Build with CMake
-      shell: bash
+    - name: Build with CMake (MSVC ARM64)
+      shell: cmd
       run: |
-        cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="dist"
-        cmake --build build
-        cmake --build build --target install
+        cmake -B build -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_INSTALL_PREFIX="dist"
+        cmake --build build --config Release --target all
+        cmake --build build --config Release --target install
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
