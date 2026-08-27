@@ -14,7 +14,7 @@ jobs:
           - os: ubuntu-latest
             cc: clang
             cxx: clang++
-          - os: windows-latest
+          - os: windows-2022
             cc: cl
             cxx: cl
     env:

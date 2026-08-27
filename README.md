@@ -138,6 +138,15 @@ You can explicitly choose a Visual Studio version on the configuration step by s
 cmake -G "Visual Studio 16 2019" -A Win32 -B build
 ```
 
+### Windows on ARM (ARM64)
+
+To build for Windows on ARM (e.g. Snapdragon X Elite), omit `-A Win32` — CMake will automatically target ARM64 when run from an ARM64 developer command prompt or on an ARM64 native system:
+```
+cmake -B build
+cmake --build build --config Release
+```
+The output DLLs will be named `hl_arm64.dll` and `client_arm64.dll`.
+
 ### Editing code in Visual Studio
 
 After the configuration step, `HLSDK-PORTABLE.sln` should appear in the `build` directory. You can open this solution in Visual Studio and continue developing there.
