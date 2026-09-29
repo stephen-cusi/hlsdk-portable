@@ -97,10 +97,19 @@ jobs:
 
     - name: Build on Windows ARM64
       if: startsWith(matrix.os, 'windows') && matrix.arm64
-      shell: cmd
+      shell: pwsh
       run: |
-        cmake -B build -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_INSTALL_PREFIX="dist"
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $ver = (& $vswhere -latest -products * -property installationVersion)
+        $major = [int]$ver.Split('.')[0]
+        $generators = @{ 17 = 'Visual Studio 17 2022'; 18 = 'Visual Studio 18 2026' }
+        if (-not $generators.ContainsKey($major)) { throw "Unsupported Visual Studio major version: $ver" }
+        $gen = $generators[$major]
+        Write-Host "Using generator: $gen (VS $ver)"
+        cmake -B build -G "$gen" -A ARM64 -DCMAKE_INSTALL_PREFIX="dist"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake --build build --config Release --target all
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake --build build --config Release --target install
 
     - name: Extract branch name
