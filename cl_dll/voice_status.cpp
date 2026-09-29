@@ -17,12 +17,9 @@
 #include "voice_status.h"
 #include "r_efx.h"
 #include "entity_types.h"
-#include "VGUI_ActionSignal.h"
 #include "VGUI_Scheme.h"
-#include "VGUI_TextImage.h"
 #include "vgui_loadtga.h"
 #include "vgui_helpers.h"
-#include "VGUI_MouseCode.h"
 
 
 
@@ -510,8 +507,10 @@ void CVoiceStatus::UpdateServerState(bool bForce)
 
 		if(gEngfuncs.pfnGetCvarFloat("voice_clientdebug"))
 		{
+			int len;
 			char msg[256];
-			sprintf(msg, "CVoiceStatus::UpdateServerState: Sending '%s'\n", str);
+			len = safe_snprintf(msg, sizeof( msg ), "CVoiceStatus::UpdateServerState: Sending '%s'\n", str);
+			if( len < 0 ) strcpy(&msg[sizeof( msg ) - 2], "\n" );
 			gEngfuncs.pfnConsolePrint(msg);
 		}
 	}
