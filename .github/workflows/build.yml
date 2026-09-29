@@ -108,7 +108,7 @@ jobs:
         Write-Host "Using generator: $gen (VS $ver)"
         cmake -B build -G "$gen" -A ARM64 -DCMAKE_INSTALL_PREFIX="dist"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --build build --config Release --target all
+        cmake --build build --config Release --target ALL_BUILD
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake --build build --config Release --target install
 
