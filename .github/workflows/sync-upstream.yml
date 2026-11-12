@@ -39,5 +39,30 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git merge upstream/master --no-edit -m "chore: sync with upstream FWGS/hlsdk-portable"
+
+        # Prefer upstream on ordinary content conflicts. This still leaves
+        # delete/modify and other unresolved conflicts behind.
+        if ! git merge upstream/master --no-edit -X theirs \
+             -m "chore: sync with upstream FWGS/hlsdk-portable"; then
+          echo "Merge left conflicts; resolving in favour of upstream:"
+          # Keep the fork's WoA (MSVC ARM64 NEON) work; the only recurring
+          # conflict sites are the NEON math files upstream keeps rewriting.
+          # Upstream's rewrites no longer use brace initialisation, so they
+          # are MSVC-compatible again - taking upstream preserves the build.
+          git diff --name-only --diff-filter=U
+          git diff -z --name-only --diff-filter=U \
+            | xargs -0 -r git checkout --theirs --
+          git add -A
+          git commit --no-edit
+        fi
+
+        # Never push upstream edits to .github/workflows: pushes made with
+        # the Actions token may not modify workflow files, and the fork's CI
+        # matrix (windows-11-arm) is maintained here, not upstream.
+        # HEAD^1 is the pre-merge fork commit, which carries our own CI.
+        if git diff --quiet HEAD^1 HEAD -- .github/workflows; then :; else
+          git restore --source HEAD^1 --staged --worktree -- .github/workflows
+          git commit --amend --no-edit
+        fi
+
         git push origin master
