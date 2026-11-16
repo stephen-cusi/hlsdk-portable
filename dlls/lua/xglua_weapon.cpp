@@ -32,6 +32,7 @@ struct XGLuaSWEPInfo
 	char viewmodel[128];
 	char worldmodel[128];
 	char ammo1[32];
+	char hudname[64];	// name reported to the client HUD (must be a known classname)
 	int clipsize;
 	int defaultclip;
 	int maxammo;
@@ -116,8 +117,10 @@ void CLuaWeapon::InitFromCache( const char *classname )
 
 	XGLuaSWEPInfo *swep = XGLua_FindSWEP( classname );
 	m_iId = WEAPON_GLOCK;	// v1: reuse the 9mm pistol id so the client HUD knows us
-	m_iDefaultAmmo = swep ? swep->defaultclip : 0;
-	m_iClip = -1;
+	// keep m_iClip == 0 so the base ExtractAmmo clip-fill branch runs;
+	// a SWEP without Primary.DefaultClip still gets a full clip
+	m_iDefaultAmmo = ( swep && swep->defaultclip > 0 ) ? swep->defaultclip : ( swep ? swep->clipsize : 0 );
+	m_iClip = 0;
 	m_fInReload = 0;
 	m_fFireOnEmpty = FALSE;
 	m_iPlayEmptySound = 1;
@@ -228,7 +231,7 @@ int CLuaWeapon::GetItemInfo( ItemInfo *p )
 	if( !swep )
 		return 0;
 	*p = swep->info;
-	p->pszName = m_szLuaClass;
+	p->pszName = swep->hudname;	// client HUD alias (v1: known 9mm pistol)
 	return 1;
 }
 
@@ -452,6 +455,9 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			XGLuaSWEPInfo *swep = &g_SWEPs[g_nSWEPs++];
 			memset( swep, 0, sizeof( XGLuaSWEPInfo ) );
 			strncpy( swep->classname, classname, sizeof( swep->classname ) - 1 );
+			// v1: the client HUD only knows vanilla weapon names — report the
+			// 9mm pistol alias (design doc 9.5 P1; P2 removes this alias)
+			strcpy( swep->hudname, "weapon_9mmhandgun" );
 
 			lua_getfield( L, -1, "ViewModel" );
 			if( lua_isstring( L, -1 ) )
@@ -504,7 +510,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			II.iMaxClip = swep->clipsize;
 			II.iSlot = swep->slot;
 			II.iPosition = swep->slotpos;
-			II.pszName = swep->classname;
+			II.pszName = swep->hudname;
 			II.iId = WEAPON_GLOCK;	// v1: shared with the 9mm pistol id
 			II.iFlags = 0;
 			II.iWeight = swep->weight ? swep->weight : 5;

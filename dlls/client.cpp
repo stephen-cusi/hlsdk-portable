@@ -495,7 +495,11 @@ void ClientCommand( edict_t *pEntity )
 		if( g_enable_cheats->value != 0 )
 		{
 			int iszItem = ALLOC_STRING( CMD_ARGV( 1 ) );	// Make a copy of the classname
-			GetClassPtr( (CBasePlayer *)pev )->GiveNamedItem( STRING( iszItem ) );
+			// XGLua: Lua SWEPs have no export symbol, route them to CLuaWeapon
+			if( XGLua_IsLuaWeapon( STRING( iszItem ) ) )
+				XGLua_GiveLuaWeapon( GetClassPtr( (CBasePlayer *)pev ), STRING( iszItem ) );
+			else
+				GetClassPtr( (CBasePlayer *)pev )->GiveNamedItem( STRING( iszItem ) );
 		}
 	}
 	else if( FStrEq( pcmd, "fire" ) )

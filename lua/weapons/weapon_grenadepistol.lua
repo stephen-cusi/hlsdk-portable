@@ -42,6 +42,7 @@ SWEP.Secondary = {}
 -- 用 HL1 的 "9mm" 弹药类型简化处理:
 --   Clip1 弹匣 = 1 发, 备弹由 GiveAmmo(6, "9mm") 提供
 SWEP.Primary.ClipSize   = 1    -- 对应 GMod SWEP.Primary.ClipSize
+SWEP.Primary.DefaultClip = 6   -- 对应 GMod SWEP.Primary.DefaultClip (拾取时弹匣+备弹总量)
 SWEP.Primary.Ammo       = "9mm" -- 对应 GMod SWEP.Primary.Ammo (HL1 弹药名)
 SWEP.Primary.Automatic  = false
 SWEP.Primary.Delay      = 0.5  -- 两发之间的间隔 (秒)
