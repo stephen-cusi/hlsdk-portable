@@ -14,6 +14,66 @@ weapons = weapons or {}
 -- The raw stored registry: className -> SWEP table
 local StoredWeapons = {}
 
+-- Resolve from raw fields so a malformed or cyclic Base chain cannot recurse
+-- indefinitely through Lua metatables. Bases may be registered in any order.
+local function resolve( swep, key )
+    local seen = {}
+    while swep do
+        if seen[ swep ] then return nil end
+        seen[ swep ] = true
+        local value = rawget( swep, key )
+        if value ~= nil then return value end
+        local name = rawget( swep, "Base" )
+        swep = type( name ) == "string" and StoredWeapons[ string.lower( name ) ] or nil
+    end
+end
+
+local WeaponBase = {
+    ClassName = "weapon_base",
+    Base = false,
+    Abstract = true,
+    Primary = { ClipSize = -1, DefaultClip = 0, Ammo = "none", Automatic = false },
+    Secondary = { ClipSize = -1, DefaultClip = 0, Ammo = "none", Automatic = false }
+}
+
+-- Shared P1 helpers use only entity/weapon methods provided by the server.
+-- A negative ClipSize means reserve-only ammunition; "none" means unlimited.
+function WeaponBase:Ammo1()
+    local primary = self.Primary or {}
+    local ammo = primary.Ammo
+    if type(ammo) ~= "string" or ammo == "" or ammo == "none" then return 0 end
+    local owner = self:GetOwner()
+    if not IsValid(owner) or not owner:IsPlayer() then return 0 end
+    return owner:GetAmmoCount(ammo)
+end
+
+function WeaponBase:GetMaxClip1()
+    local primary = self.Primary or {}
+    return primary.ClipSize or -1
+end
+
+function WeaponBase:CanPrimaryAttack()
+    local primary = self.Primary or {}
+    local clipSize = self:GetMaxClip1()
+    local ammo = primary.Ammo
+    local hasAmmo = clipSize < 0 and
+        (ammo == nil or ammo == "" or ammo == "none" or self:Ammo1() > 0) or
+        (clipSize >= 0 and self:Clip1() > 0)
+    if hasAmmo then return true end
+    self:PlayEmptySound()
+    self:SetNextPrimaryFire(CurTime() + 0.2)
+    return false
+end
+
+-- The native helper starts a timed reload and transfers ammo when it finishes.
+function WeaponBase:Reload()
+    local clipSize = self:GetMaxClip1()
+    if clipSize <= 0 then return false end
+    return self:DefaultReload(clipSize, self.ReloadAnimation or 0, self.ReloadTime or 2)
+end
+
+StoredWeapons.weapon_base = WeaponBase
+
 --[[---------------------------------------------------------------------------
 	Name: weapons.Register( swep_table, className )
 	Desc: Registers a SWEP table under the given class name. The table's
@@ -34,6 +94,21 @@ function weapons.Register( swep_table, className )
 
 	-- GMod stamps the class name onto the table
 	swep_table.ClassName = className
+    if className ~= "weapon_base" and rawget( swep_table, "Base" ) == nil then
+        swep_table.Base = "weapon_base"
+    end
+    if rawget( swep_table, "Abstract" ) == nil then swep_table.Abstract = false end
+    local previous = getmetatable( swep_table )
+    if previous ~= nil then
+        print( "[XGLua] weapons.Register: SWEP tables with custom metatables are not supported" )
+        return nil
+    end
+    setmetatable( swep_table, { __index = function( table_, key )
+        local base = rawget( table_, "Base" )
+        local parent = type( base ) == "string" and StoredWeapons[ string.lower( base ) ] or nil
+        if key == "BaseClass" then return parent end
+        return resolve( parent, key )
+    end } )
 
 	StoredWeapons[ className ] = swep_table
 

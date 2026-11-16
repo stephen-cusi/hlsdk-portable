@@ -327,11 +327,24 @@ static int Ent_GetName( lua_State *L )
 
 static int Ent_Index( lua_State *L )
 {
-	// method lookup straight off the shared metatable
+	edict_t *pent = XGLua_CheckEntity( L, 1 );
+	const char *cls = STRING( VARS( pent )->classname );
+	if( XGLua_IsLuaWeapon( cls ) )
+	{
+		XGLua_GetSWEPRegistry( L );
+		lua_getfield( L, -1, cls );
+		if( lua_istable( L, -1 ) )
+		{
+			lua_pushvalue( L, 2 );
+			lua_gettable( L, -2 );
+			if( !lua_isnil( L, -1 ) ) return 1;
+			lua_pop( L, 1 );
+		}
+		lua_pop( L, 2 );
+	}
 	luaL_getmetatable( L, XGLUA_ENTITY_META );
 	lua_pushvalue( L, 2 );
 	lua_rawget( L, -2 );
-	lua_remove( L, -2 );	// metatable
 	return 1;
 }
 

@@ -291,7 +291,7 @@ BOOL XGLua_IsLuaWeapon( const char *classname )
 	XGLua_GetSWEPRegistry( L );
 	lua_pushstring( L, classname );
 	lua_rawget( L, -2 );
-	BOOL bFound = !lua_isnil( L, -1 );
+	BOOL bFound = lua_istable( L, -1 );
 	lua_pop( L, 2 );
 	return bFound;
 }
@@ -435,10 +435,14 @@ void XGLua_Startup( void )
 	// 3b. snapshot SWEP tables into the C++ cache (ItemInfoArray etc.)
 	XGLua_BuildWeaponCache( L );
 
-	// GMod order: Initialize then InitPostEntity
-	XGLua_HookRun( L, "Initialize" );
-	XGLua_HookRun( L, "InitPostEntity" );
+	ALERT( at_console, "[XGLua] scripts loaded, waiting for ServerActivate\n" );
+}
 
+void XGLua_PostEntityInit( void )
+{
+	if( !g_xglua_L ) return;
+	XGLua_HookRun( g_xglua_L, "Initialize" );
+	XGLua_HookRun( g_xglua_L, "InitPostEntity" );
 	ALERT( at_console, "[XGLua] scripts loaded, VM ready\n" );
 }
 

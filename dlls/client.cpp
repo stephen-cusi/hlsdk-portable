@@ -762,7 +762,7 @@ void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )
 	LinkUserMessages();
 
 	// XGLua: create the VM and load all scripts (after entities are ready)
-	XGLua_Startup();
+	XGLua_PostEntityInit();
 }
 
 /*

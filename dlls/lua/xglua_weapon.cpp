@@ -14,6 +14,7 @@
 #include <cstdio>
 
 #include "xglua.h"
+#include "xglua_swep_bridge.h"
 #include "weapons.h"
 #include "player.h"
 extern "C" {
@@ -33,6 +34,9 @@ struct XGLuaSWEPInfo
 	char worldmodel[128];
 	char ammo1[32];
 	char hudname[64];	// name reported to the client HUD (must be a known classname)
+	int id;
+	bool primaryAutomatic;
+	bool secondaryAutomatic;
 	int clipsize;
 	int defaultclip;
 	int maxammo;
@@ -87,27 +91,15 @@ static void CallWeaponMethod( CLuaWeapon *w, const char *method )
 	if( !L || !w )
 		return;
 
-	XGLua_GetSWEPRegistry( L );
-	lua_pushstring( L, w->m_szLuaClass );
-	lua_rawget( L, -2 );
-	if( !lua_istable( L, -1 ) )
-	{
-		lua_pop( L, 2 );
+	if( !XGLua_PushSWEPMethod( L, w->m_szLuaClass, method ) )
 		return;
-	}
-	lua_getfield( L, -1, method );
-	if( !lua_isfunction( L, -1 ) )
-	{
-		lua_pop( L, 3 );
-		return;
-	}
-	lua_remove( L, -2 );	// drop SWEP table
-	lua_remove( L, -2 );	// drop registry
 	XGLua_PushEntity( L, w->edict() );
 
 	if( lua_pcall( L, 1, 0, 0 ) != 0 )
+	{
 		ALERT( at_console, "[XGLua] SWEP:%s error:\n%s\n", method, lua_tostring( L, -1 ) );
-	lua_pop( L, 1 );
+		lua_pop( L, 1 );
+	}
 }
 
 void CLuaWeapon::InitFromCache( const char *classname )
@@ -116,11 +108,11 @@ void CLuaWeapon::InitFromCache( const char *classname )
 	m_szLuaClass[sizeof( m_szLuaClass ) - 1] = '\0';
 
 	XGLuaSWEPInfo *swep = XGLua_FindSWEP( classname );
-	m_iId = WEAPON_GLOCK;	// v1: reuse the 9mm pistol id so the client HUD knows us
+	m_iId = swep ? swep->id : 0;
 	// keep m_iClip == 0 so the base ExtractAmmo clip-fill branch runs;
 	// a SWEP without Primary.DefaultClip still gets a full clip
-	m_iDefaultAmmo = ( swep && swep->defaultclip > 0 ) ? swep->defaultclip : ( swep ? swep->clipsize : 0 );
-	m_iClip = 0;
+	m_iDefaultAmmo = swep ? swep->defaultclip : 0;
+	m_iClip = ( swep && swep->clipsize < 0 ) ? WEAPON_NOCLIP : 0;
 	m_fInReload = 0;
 	m_fFireOnEmpty = FALSE;
 	m_iPlayEmptySound = 1;
@@ -135,9 +127,8 @@ void CLuaWeapon::Precache( void )
 void CLuaWeapon::Spawn( void )
 {
 	Precache();
-	m_iId = WEAPON_GLOCK;
-
 	XGLuaSWEPInfo *swep = XGLua_FindSWEP( m_szLuaClass );
+	m_iId = swep ? swep->id : 0;
 	if( swep && swep->worldmodel[0] )
 		SET_MODEL( ENT( pev ), swep->worldmodel );
 
@@ -163,7 +154,7 @@ BOOL CLuaWeapon::Deploy( void )
 void CLuaWeapon::Holster( int skiplocal )
 {
 	CallWeaponMethod( this, "Holster" );
-	CBasePlayerItem::Holster( skiplocal );
+	CBasePlayerWeapon::Holster( skiplocal );
 }
 
 void CLuaWeapon::PrimaryAttack( void )
@@ -200,28 +191,30 @@ BOOL CLuaWeapon::CanDeploy( void )
 
 void CLuaWeapon::ItemPostFrame( void )
 {
-	// mirror the base class bookkeeping, then route input to Lua
-	if( !m_pPlayer )
-		return;
-
-	m_flNextPrimaryAttack = Q_max( m_flNextPrimaryAttack - gpGlobals->frametime, -1.0f );
-	m_flNextSecondaryAttack = Q_max( m_flNextSecondaryAttack - gpGlobals->frametime, -1.0f );
-	m_flTimeWeaponIdle = Q_max( m_flTimeWeaponIdle - gpGlobals->frametime, -1.0f );
-
+	if( !m_pPlayer ) return;
+	// Complete a pending DefaultReload using the engine's server clock.
+	if( m_fInReload && m_pPlayer->m_flNextAttack <= UTIL_WeaponTimeBase() )
+	{
+		int n = Q_min( iMaxClip() - m_iClip, m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] );
+		m_iClip += n;
+		m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] -= n;
+		m_pPlayer->TabulateAmmo();
+		m_fInReload = FALSE;
+	}
+	XGLuaSWEPInfo *swep = XGLua_FindSWEP( m_szLuaClass );
+	if( !swep ) return;
 	int buttons = m_pPlayer->pev->button;
-
-	if( ( buttons & IN_ATTACK ) && gpGlobals->time >= m_flNextPrimaryAttack )
-	{
-		PrimaryAttack();
-	}
-	else if( ( buttons & IN_ATTACK2 ) && gpGlobals->time >= m_flNextSecondaryAttack )
-	{
+	int pressed = m_pPlayer->m_afButtonPressed;
+	if( ( buttons & IN_ATTACK2 ) && ( swep->secondaryAutomatic || ( pressed & IN_ATTACK2 ) ) && gpGlobals->time >= m_flNextSecondaryAttack )
 		SecondaryAttack();
-	}
-
-	if( ( buttons & IN_RELOAD ) && gpGlobals->time >= m_flNextPrimaryAttack )
-	{
+	else if( ( buttons & IN_ATTACK ) && ( swep->primaryAutomatic || ( pressed & IN_ATTACK ) ) && gpGlobals->time >= m_flNextPrimaryAttack )
+		PrimaryAttack();
+	else if( ( buttons & IN_RELOAD ) && !m_fInReload )
 		Reload();
+	else if( !( buttons & ( IN_ATTACK | IN_ATTACK2 ) ) )
+	{
+		ResetEmptySound();
+		WeaponIdle();
 	}
 }
 
@@ -231,7 +224,7 @@ int CLuaWeapon::GetItemInfo( ItemInfo *p )
 	if( !swep )
 		return 0;
 	*p = swep->info;
-	p->pszName = swep->hudname;	// client HUD alias (v1: known 9mm pistol)
+	p->pszName = swep->classname;
 	return 1;
 }
 
@@ -281,9 +274,16 @@ CBasePlayerItem *XGLua_GiveLuaWeapon( CBasePlayer *pPlayer, const char *classnam
 	// reach it — server-side switch is the v1 answer (design doc 9.5 P1)
 	DispatchSpawn( pent );
 	DispatchTouch( pent, ENT( pPlayer->pev ) );
-	pPlayer->SwitchWeapon( pItem );
-
-	return pItem;
+	// DispatchTouch may have rejected this item or consumed it as a duplicate.
+	// Find the actual owned object before selecting or returning it.
+	for( int slot = 0; slot < MAX_ITEM_TYPES; ++slot )
+		for( CBasePlayerItem *owned = pPlayer->m_rgpPlayerItems[slot]; owned; owned = owned->m_pNext )
+			if( FClassnameIs( owned->pev, classname ) )
+			{
+				pPlayer->SelectItem( classname );
+				return owned;
+			}
+	return NULL;
 }
 
 //===========================================================================
@@ -316,14 +316,14 @@ static int Wep_SetNextPrimaryFire( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
 	double t = luaL_checknumber( L, 2 );
-	w->m_flNextPrimaryAttack = (float)( t - gpGlobals->time );
+	w->m_flNextPrimaryAttack = (float)t;
 	return 0;
 }
 
 static int Wep_GetNextPrimaryFire( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
-	lua_pushnumber( L, gpGlobals->time + w->m_flNextPrimaryAttack );
+	lua_pushnumber( L, w->m_flNextPrimaryAttack );
 	return 1;
 }
 
@@ -331,14 +331,14 @@ static int Wep_SetNextSecondaryFire( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
 	double t = luaL_checknumber( L, 2 );
-	w->m_flNextSecondaryAttack = (float)( t - gpGlobals->time );
+	w->m_flNextSecondaryAttack = (float)t;
 	return 0;
 }
 
 static int Wep_GetNextSecondaryFire( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
-	lua_pushnumber( L, gpGlobals->time + w->m_flNextSecondaryAttack );
+	lua_pushnumber( L, w->m_flNextSecondaryAttack );
 	return 1;
 }
 
@@ -360,13 +360,25 @@ static int Wep_TakePrimaryAmmo( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
 	int n = (int)luaL_checknumber( L, 2 );
-	int iType = w->PrimaryAmmoIndex();
-	if( iType >= 0 && w->m_pPlayer && w->m_pPlayer->m_rgAmmo[iType] > 0 )
-	{
-		int take = n < w->m_pPlayer->m_rgAmmo[iType] ? n : w->m_pPlayer->m_rgAmmo[iType];
-		w->m_pPlayer->m_rgAmmo[iType] -= take;
-	}
+	if( n <= 0 ) return 0;
+	if( w->iMaxClip() != WEAPON_NOCLIP )
+		w->m_iClip = Q_max( 0, w->m_iClip - n );
+	else if( w->m_pPlayer && w->PrimaryAmmoIndex() >= 0 )
+		w->m_pPlayer->m_rgAmmo[w->PrimaryAmmoIndex()] = Q_max( 0, w->m_pPlayer->m_rgAmmo[w->PrimaryAmmoIndex()] - n );
 	return 0;
+}
+
+static int Wep_DefaultReload( lua_State *L )
+{
+	CLuaWeapon *w = WeaponFromLua( L, 1 );
+	int clip = (int)luaL_checknumber( L, 2 );
+	int anim = (int)luaL_checknumber( L, 3 );
+	float delay = (float)luaL_checknumber( L, 4 );
+	if( !w->m_pPlayer || w->PrimaryAmmoIndex() < 0 || w->m_fInReload ||
+		clip <= w->m_iClip || clip > w->iMaxClip() || delay < 0 )
+	{ lua_pushboolean( L, false ); return 1; }
+	lua_pushboolean( L, w->DefaultReload( clip, anim, delay ) );
+	return 1;
 }
 
 static int Wep_SendWeaponAnim( lua_State *L )
@@ -403,6 +415,7 @@ void XGLua_RegisterWeaponLibs( lua_State *L )
 			{ "Clip1", Wep_Clip1 },
 			{ "SetClip1", Wep_SetClip1 },
 			{ "TakePrimaryAmmo", Wep_TakePrimaryAmmo },
+			{ "DefaultReload", Wep_DefaultReload },
 			{ "SendWeaponAnim", Wep_SendWeaponAnim },
 			{ "PlayEmptySound", Wep_PlayEmptySound },
 			{ NULL, NULL }
@@ -418,6 +431,7 @@ void XGLua_RegisterWeaponLibs( lua_State *L )
 
 void XGLua_BuildWeaponCache( lua_State *L )
 {
+	g_nSWEPs = 0;
 	// iterate weapons.GetStored() (Lua side, filled by weapons.Register)
 	lua_getglobal( L, "weapons" );
 	if( !lua_istable( L, -1 ) )
@@ -452,8 +466,16 @@ void XGLua_BuildWeaponCache( lua_State *L )
 				continue;
 			}
 
+			lua_getfield( L, -1, "Abstract" );
+			bool abstract = lua_toboolean( L, -1 ) != 0;
+			lua_pop( L, 1 );
+			if( abstract ) { lua_pop( L, 1 ); continue; }
+					int id = 16;
+			while( id < WEAPON_SUIT && CBasePlayerItem::ItemInfoArray[id].iId ) ++id;
+			if( id >= WEAPON_SUIT ) { ALERT( at_console, "[XGLua] no free weapon ID for %s\n", classname ); lua_pop( L, 1 ); continue; }
 			XGLuaSWEPInfo *swep = &g_SWEPs[g_nSWEPs++];
 			memset( swep, 0, sizeof( XGLuaSWEPInfo ) );
+			swep->id = id;
 			strncpy( swep->classname, classname, sizeof( swep->classname ) - 1 );
 			// v1: the client HUD only knows vanilla weapon names — report the
 			// 9mm pistol alias (design doc 9.5 P1; P2 removes this alias)
@@ -471,22 +493,27 @@ void XGLua_BuildWeaponCache( lua_State *L )
 
 			lua_getfield( L, -1, "Slot" );
 			swep->slot = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 2;
+			swep->slot = Q_max( 0, Q_min( swep->slot, MAX_WEAPON_SLOTS - 1 ) );
 			lua_pop( L, 1 );
 
 			lua_getfield( L, -1, "SlotPos" );
 			swep->slotpos = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 1;
+			swep->slotpos = Q_max( 0, Q_min( swep->slotpos, MAX_WEAPON_SLOTS - 1 ) );
 			lua_pop( L, 1 );
 
 			// SWEP.Primary sub-table
 			lua_getfield( L, -1, "Primary" );
 			if( lua_istable( L, -1 ) )
 			{
+				lua_getfield( L, -1, "Automatic" );
+				swep->primaryAutomatic = lua_toboolean( L, -1 ) != 0;
+				lua_pop( L, 1 );
 				lua_getfield( L, -1, "ClipSize" );
 				swep->clipsize = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : -1;
 				lua_pop( L, 1 );
 
 				lua_getfield( L, -1, "DefaultClip" );
-				swep->defaultclip = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 0;
+				swep->defaultclip = XGLua_InitialWeaponAmmo( lua_isnumber( L, -1 ), (int)lua_tonumber( L, -1 ), swep->clipsize );
 				lua_pop( L, 1 );
 
 				lua_getfield( L, -1, "Ammo" );
@@ -496,22 +523,62 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			}
 			lua_pop( L, 1 );
 
+			lua_getfield( L, -1, "Secondary" );
+			if( lua_istable( L, -1 ) )
+			{
+				lua_getfield( L, -1, "Automatic" );
+				swep->secondaryAutomatic = lua_toboolean( L, -1 ) != 0;
+				lua_pop( L, 1 );
+			}
+			lua_pop( L, 1 );
+
 			if( !swep->ammo1[0] )
-				strcpy( swep->ammo1, "9mm" );
-			swep->maxammo = 68;	// HL1 9mm carry max
+				strcpy( swep->ammo1, "none" );
+			// Infinite-ammo weapons have no reserve to refill a finite clip.
+			// Reject that unsupported combination instead of spawning a dead weapon.
+			if( !XGLua_ValidAmmoClipConfig( swep->ammo1, swep->clipsize ) )
+			{
+				ALERT( at_console, "[XGLua] %s: invalid ClipSize/Ammo; use -1 for clipless, positive clip with reserve ammo\n", classname );
+				--g_nSWEPs;
+				lua_pop( L, 1 );
+				continue;
+			}
+			swep->maxammo = 68;	// default reserve limit
+
+			// The stock HUD stores only one weapon per slot/position pair.
+			bool foundPosition = false;
+			for( int offset = 0; offset < MAX_WEAPON_SLOTS * MAX_WEAPON_SLOTS; ++offset )
+			{
+				int cell = ( swep->slot * MAX_WEAPON_SLOTS + swep->slotpos + offset ) % ( MAX_WEAPON_SLOTS * MAX_WEAPON_SLOTS );
+				int slot = cell / MAX_WEAPON_SLOTS, position = cell % MAX_WEAPON_SLOTS;
+				bool occupied = false;
+				for( int i = 1; i < MAX_WEAPONS; ++i )
+				{
+					const ItemInfo &existing = CBasePlayerItem::ItemInfoArray[i];
+					if( existing.iId && existing.iSlot == slot && existing.iPosition == position ) { occupied = true; break; }
+				}
+				if( !occupied ) { swep->slot = slot; swep->slotpos = position; foundPosition = true; break; }
+			}
+			if( !foundPosition )
+			{
+				ALERT( at_console, "[XGLua] no free HUD slot for %s\n", classname );
+				--g_nSWEPs;
+				lua_pop( L, 1 );
+				continue;
+			}
 
 			// fill the ItemInfoArray slot — mirrors UTIL_PrecacheOtherWeapon
 			ItemInfo &II = swep->info;
 			memset( &II, 0, sizeof( II ) );
-			II.pszAmmo1 = swep->ammo1;
+			II.pszAmmo1 = strcmp( swep->ammo1, "none" ) ? swep->ammo1 : NULL;
 			II.iMaxAmmo1 = swep->maxammo;
 			II.pszAmmo2 = NULL;
 			II.iMaxAmmo2 = -1;
 			II.iMaxClip = swep->clipsize;
 			II.iSlot = swep->slot;
 			II.iPosition = swep->slotpos;
-			II.pszName = swep->hudname;
-			II.iId = WEAPON_GLOCK;	// v1: shared with the 9mm pistol id
+			II.pszName = swep->classname;
+			II.iId = swep->id;
 			II.iFlags = 0;
 			II.iWeight = swep->weight ? swep->weight : 5;
 
@@ -526,12 +593,8 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( swep->worldmodel[0] )
 				PRECACHE_MODEL( (char *)swep->worldmodel );
 
-			// strong-ref the SWEP table: registry[XGLUA_SWEP_REGISTRY][classname]
-			XGLua_GetSWEPRegistry( L );
-			lua_pushstring( L, swep->classname );
-			lua_pushvalue( L, -4 );	// SWEP table
-			lua_settable( L, -3 );
-			lua_pop( L, 1 );
+			// Keep the actual table, not the lua_next classname key.
+			XGLua_StoreSWEPTable( L, -1, swep->classname );
 
 			ALERT( at_console, "[XGLua] registered SWEP: %s\n", swep->classname );
 		}

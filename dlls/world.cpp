@@ -31,6 +31,7 @@
 #include "effects.h"
 #include "player.h"
 #include "weapons.h"
+#include "lua/xglua.h"
 #include "gamerules.h"
 #include "teamplay_gamerules.h"
 
@@ -501,6 +502,7 @@ void CWorld::Precache( void )
 	// the area based ambient sounds MUST be the first precache_sounds
 	// player precaches
 	W_Precache();				// get weapon precaches
+	XGLua_Startup(); // register SWEP resources while engine permits precaching
 
 	ClientPrecache();
 

@@ -27,6 +27,7 @@ class CBasePlayer;
 //
 void XGLua_Init( void );                            // GameDLLInit: register console commands
 void XGLua_Startup( void );                         // ServerActivate: create VM + load scripts
+void XGLua_PostEntityInit( void );                  // ServerActivate: entity hooks
 void XGLua_Shutdown( void );                        // ServerDeactivate: close VM
 void XGLua_StartFrame( void );                      // StartFrame: timer.Tick + hook Think
 void XGLua_PlayerSpawn( CBasePlayer *pPlayer );     // CBasePlayer::Spawn: hook PlayerSpawn
