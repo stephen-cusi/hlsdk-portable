@@ -23,15 +23,16 @@ jobs:
     - name: Check for new commits
       id: check
       run: |
-        LOCAL=$(git rev-parse HEAD)
-        UPSTREAM=$(git rev-parse upstream/master)
-        if [ "$LOCAL" = "$UPSTREAM" ]; then
+        # Only sync when the fork is actually behind. Being ahead (fork-only
+        # WoA/CI commits) must not trigger a sync - merging would be a no-op
+        # and the workflows-restore guard below would misfire on HEAD^1.
+        BEHIND=$(git rev-list --count HEAD..upstream/master)
+        echo "Behind by $BEHIND commits."
+        if [ "$BEHIND" = "0" ]; then
           echo "changed=false" >> $GITHUB_OUTPUT
           echo "Already up to date."
         else
           echo "changed=true" >> $GITHUB_OUTPUT
-          BEHIND=$(git rev-list --count HEAD..upstream/master)
-          echo "Behind by $BEHIND commits."
         fi
 
     - name: Merge upstream
@@ -39,6 +40,9 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Pre-merge fork commit; the reference for restoring our workflows.
+        PREV=$(git rev-parse HEAD)
 
         # Prefer upstream on ordinary content conflicts. This still leaves
         # delete/modify and other unresolved conflicts behind.
@@ -59,9 +63,11 @@ jobs:
         # Never push upstream edits to .github/workflows: pushes made with
         # the Actions token may not modify workflow files, and the fork's CI
         # matrix (windows-11-arm) is maintained here, not upstream.
-        # HEAD^1 is the pre-merge fork commit, which carries our own CI.
-        if git diff --quiet HEAD^1 HEAD -- .github/workflows; then :; else
-          git restore --source HEAD^1 --staged --worktree -- .github/workflows
+        # Compare against the pre-merge snapshot instead of HEAD^1, so a
+        # no-op merge ("Already up to date", no commit created) is a no-op
+        # here too instead of amending an unrelated commit away.
+        if git diff --quiet "$PREV" HEAD -- .github/workflows; then :; else
+          git restore --source "$PREV" --staged --worktree -- .github/workflows
           git commit --amend --no-edit
         fi
 
