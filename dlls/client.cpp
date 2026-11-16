@@ -39,6 +39,7 @@
 #include "usercmd.h"
 #include "netadr.h"
 #include "pm_shared.h"
+#include "lua/xglua.h"	// XGLua
 
 extern DLL_GLOBAL ULONG		g_ulModelIndexPlayer;
 extern DLL_GLOBAL BOOL		g_fGameOver;
@@ -714,6 +715,9 @@ void ServerDeactivate( void )
 
 	g_serveractive = 0;
 
+	// XGLua: close the Lua VM (one VM per map, GMod-style)
+	XGLua_Shutdown();
+
 	// Peform any shutdown operations here...
 	//
 }
@@ -752,6 +756,9 @@ void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )
 
 	// Link user messages here to make sure first client can get them...
 	LinkUserMessages();
+
+	// XGLua: create the VM and load all scripts (after entities are ready)
+	XGLua_Startup();
 }
 
 /*
@@ -807,6 +814,9 @@ void ParmsChangeLevel( void )
 void StartFrame( void )
 {
 	//ALERT( at_console, "SV_Physics( %g, frametime %g )\n", gpGlobals->time, gpGlobals->frametime );
+
+	// XGLua: timer.Tick() + hook.Run("Think")
+	XGLua_StartFrame();
 
 	if( g_pGameRules )
 		g_pGameRules->Think();

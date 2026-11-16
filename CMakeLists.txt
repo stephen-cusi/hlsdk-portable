@@ -162,6 +162,19 @@ endif()
 # see documentation: https://github.com/FWGS/xash3d-fwgs/blob/master/Documentation/extensions/library-naming.md
 include(LibraryNaming)
 
+# XGLua — engine-level LuaJIT shared library (external repo, built separately).
+# Produces dist/<arch>/lua_shared.{dll,lib}; linked by the game DLL as an import lib.
+set(XGLUA_LUAJIT_DIR "${CMAKE_SOURCE_DIR}/../xglua-luajit" CACHE PATH
+	"Path to the xglua-luajit repo (LuaJIT fork + GLua dialect patches)")
+if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
+	message(STATUS "XGLua: lua_shared found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}")
+	set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
+else()
+	message(FATAL_ERROR
+		"XGLua: lua_shared.lib not found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/\n"
+		"Build it first: cd <xglua-luajit> && script\\build.bat ${BUILDARCH} dll")
+endif()
+
 if(XASH_PS4)
 	include(PS4)
 endif()

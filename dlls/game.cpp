@@ -17,6 +17,7 @@
 #include "util.h"
 #include "game.h"
 #include "vcs_info.h"
+#include "lua/xglua.h"	// XGLua
 
 static cvar_t build_commit = { "sv_game_build_commit", g_VCSInfo_Commit };
 static cvar_t build_branch = { "sv_game_build_branch", g_VCSInfo_Branch };
@@ -467,6 +468,8 @@ cvar_t sv_busters = { "sv_busters", "0" };
 // This gets called one time when the game is initialied
 void GameDLLInit( void )
 {
+	XGLua_Init();	// XGLua: register lua_run console command
+
 	g_psv_gravity = CVAR_GET_POINTER( "sv_gravity" );
 	g_psv_aim = CVAR_GET_POINTER( "sv_aim" );
 	g_psv_allow_autoaim = CVAR_GET_POINTER( "sv_allow_autoaim" );

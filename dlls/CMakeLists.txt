@@ -145,6 +145,11 @@ set (SVDLL_SOURCES
 	world.cpp
 	xen.cpp
 	zombie.cpp
+	# XGLua — game-side Lua glue (VM lifecycle, bindings, SWEP)
+	lua/xglua_vm.cpp
+	lua/xglua_types.cpp
+	lua/xglua_entity.cpp
+	lua/xglua_weapon.cpp
 	../game_shared/voice_gamemgr.cpp
 	../pm_shared/pm_debug.c
 	../pm_shared/pm_math.c
@@ -166,7 +171,8 @@ else()
 		../external/openbsd/strlcat.c)
 endif()
 
-include_directories (. wpn_shared ../common ../engine ../pm_shared ../game_shared ../public)
+include_directories (. wpn_shared ../common ../engine ../pm_shared ../game_shared ../public
+	${XGLUA_LUAJIT_DIR}/src)
 
 if(MSVC)
 	set(SVDLL_SOURCES
@@ -175,7 +181,7 @@ if(MSVC)
 endif()
 
 add_library (${SVDLL_LIBRARY} SHARED ${SVDLL_SOURCES})
-target_link_libraries(${SVDLL_LIBRARY} vcs_info)
+target_link_libraries(${SVDLL_LIBRARY} vcs_info ${XGLUA_LUA_SHARED})
 
 set_target_properties (${SVDLL_LIBRARY} PROPERTIES POSITION_INDEPENDENT_CODE 1)
 

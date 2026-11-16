@@ -25,6 +25,7 @@
 
 #include "cbase.h"
 #include "player.h"
+#include "lua/xglua.h"	// XGLua
 #include "trains.h"
 #include "nodes.h"
 #include "weapons.h"
@@ -3045,6 +3046,8 @@ void CBasePlayer::Precache( void )
 		m_fInitHUD = TRUE;
 
 	pev->fov = m_iFOV;	// Vit_amiN: restore the FOV on level change or map/saved game load
+
+	XGLua_PlayerSpawn( this );	// XGLua: hook.Run("PlayerSpawn", ent)
 }
 
 int CBasePlayer::Save( CSave &save )
