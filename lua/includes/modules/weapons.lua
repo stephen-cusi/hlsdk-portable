@@ -47,6 +47,27 @@ function WeaponBase:Ammo1()
     return owner:GetAmmoCount(ammo)
 end
 
+-- GoldSrc secondary ammunition is reserve-only; it has no second clip.
+function WeaponBase:Ammo2()
+    local secondary = self.Secondary or {}
+    local ammo = secondary.Ammo
+    if type(ammo) ~= "string" or ammo == "" or ammo == "none" then return 0 end
+    local owner = self:GetOwner()
+    if not IsValid(owner) or not owner:IsPlayer() then return 0 end
+    return owner:GetAmmoCount(ammo)
+end
+
+function WeaponBase:CanSecondaryAttack()
+    local secondary = self.Secondary or {}
+    local ammo = secondary.Ammo
+    if ammo == nil or ammo == "" or ammo == "none" or self:Ammo2() > 0 then
+        return true
+    end
+    self:PlayEmptySound()
+    self:SetNextSecondaryFire(CurTime() + 0.2)
+    return false
+end
+
 function WeaponBase:GetMaxClip1()
     local primary = self.Primary or {}
     return primary.ClipSize or -1

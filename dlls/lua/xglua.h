@@ -55,6 +55,7 @@ void XGLua_GetSWEPRegistry( lua_State *L );              // registry table acces
 void XGLua_RegisterWeaponLibs( lua_State *L );                // weapon entity methods
 void XGLua_BuildWeaponCache( lua_State *L );                  // SWEP tables -> C++ cache
 CBasePlayerItem *XGLua_GiveLuaWeapon( CBasePlayer *pPlayer, const char *classname );
+BOOL XGLua_CanPickupSecondary( CBasePlayer *player, CBasePlayerItem *item );
 
 //
 // Types (Vector / Angle)
@@ -62,6 +63,7 @@ CBasePlayerItem *XGLua_GiveLuaWeapon( CBasePlayer *pPlayer, const char *classnam
 void XGLua_RegisterTypes( lua_State *L );
 void XGLua_PushVector( lua_State *L, const Vector &v );
 Vector XGLua_CheckVector( lua_State *L, int idx );
+Vector XGLua_CheckAngle( lua_State *L, int idx );
 
 //
 // Shared VM pointer (NULL when no scripts loaded / shutdown)

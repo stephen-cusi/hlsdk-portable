@@ -288,7 +288,7 @@ static int Ent_StopSound( lua_State *L )
 {
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
 	const char *name = luaL_checkstring( L, 2 );
-	EMIT_SOUND( pent, CHAN_ITEM, name, 0, ATTN_NORM );	// vol 0 stops
+	STOP_SOUND( pent, CHAN_ITEM, name );
 	return 0;
 }
 
@@ -398,6 +398,16 @@ static int Ply_GetAimVector( lua_State *L )
 	extern void XGLua_PushVector( lua_State *L, const Vector &v );
 	XGLua_PushVector( L, gpGlobals->v_forward );
 	return 1;
+}
+
+static int Ply_ViewPunch( lua_State *L )
+{
+	CBasePlayer *p = Ply( L, 1 );
+	Vector angle = XGLua_CheckAngle( L, 2 );
+	if( !std::isfinite( angle.x ) || !std::isfinite( angle.y ) || !std::isfinite( angle.z ) )
+		return luaL_argerror( L, 2, "angle must be finite" );
+	p->pev->punchangle = p->pev->punchangle + angle;
+	return 0;
 }
 
 static int Ply_EyePos( lua_State *L )
@@ -658,6 +668,7 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "Alive", Ply_Alive },
 		{ "GetActiveWeapon", Ply_GetActiveWeapon },
 		{ "GetAimVector", Ply_GetAimVector },
+		{ "ViewPunch", Ply_ViewPunch },
 		{ "EyePos", Ply_EyePos },
 		{ "EyeAngles", Ply_EyeAngles },
 		{ "Give", Ply_Give },

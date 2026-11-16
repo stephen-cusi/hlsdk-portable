@@ -44,7 +44,7 @@ static XGLuaVec *XGLua_NewAngle( lua_State *L, float p, float y, float r )
 	return v;
 }
 
-static XGLuaVec *XGLua_CheckAngle( lua_State *L, int idx )
+static XGLuaVec *XGLua_CheckAngleData( lua_State *L, int idx )
 {
 	return (XGLuaVec *)luaL_checkudata( L, idx, XGLUA_ANGLE_META );
 }
@@ -57,6 +57,12 @@ void XGLua_PushVector( lua_State *L, const Vector &v )
 Vector XGLua_CheckVector( lua_State *L, int idx )
 {
 	XGLuaVec *v = XGLua_CheckVec( L, idx );
+	return Vector( v->x, v->y, v->z );
+}
+
+Vector XGLua_CheckAngle( lua_State *L, int idx )
+{
+	XGLuaVec *v = XGLua_CheckAngleData( L, idx );
 	return Vector( v->x, v->y, v->z );
 }
 
@@ -270,7 +276,7 @@ static int Ang_Construct( lua_State *L )
 
 static int Ang_Index( lua_State *L )
 {
-	XGLuaVec *v = XGLua_CheckAngle( L, 1 );
+	XGLuaVec *v = XGLua_CheckAngleData( L, 1 );
 	const char *k = luaL_checkstring( L, 2 );
 	if( !strcmp( k, "pitch" ) ) { lua_pushnumber( L, v->x ); return 1; }
 	if( !strcmp( k, "yaw" ) )   { lua_pushnumber( L, v->y ); return 1; }
@@ -293,7 +299,7 @@ static int Ang_Index( lua_State *L )
 
 static int Ang_NewIndex( lua_State *L )
 {
-	XGLuaVec *v = XGLua_CheckAngle( L, 1 );
+	XGLuaVec *v = XGLua_CheckAngleData( L, 1 );
 	const char *k = luaL_checkstring( L, 2 );
 	float val = (float)luaL_checknumber( L, 3 );
 	if( !strcmp( k, "pitch" ) ) { v->x = val; return 0; }
@@ -313,7 +319,7 @@ static int Ang_NewIndex( lua_State *L )
 
 static int Ang_ToString( lua_State *L )
 {
-	XGLuaVec *v = XGLua_CheckAngle( L, 1 );
+	XGLuaVec *v = XGLua_CheckAngleData( L, 1 );
 	char buf[64];
 	snprintf( buf, sizeof( buf ), "%.2f %.2f %.2f", v->x, v->y, v->z );
 	lua_pushstring( L, buf );
@@ -322,7 +328,7 @@ static int Ang_ToString( lua_State *L )
 
 static int Ang_Zero( lua_State *L )
 {
-	XGLua_CheckAngle( L, 1 )->x = XGLua_CheckAngle( L, 1 )->y = XGLua_CheckAngle( L, 1 )->z = 0;
+	XGLua_CheckAngleData( L, 1 )->x = XGLua_CheckAngleData( L, 1 )->y = XGLua_CheckAngleData( L, 1 )->z = 0;
 	return 0;
 }
 

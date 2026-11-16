@@ -25,6 +25,7 @@
 #include	"teamplay_gamerules.h"
 #include	"skill.h"
 #include	"game.h"
+#include	"lua/xglua.h" // XGLua
 
 extern edict_t *EntSelectSpawnPoint( CBaseEntity *pPlayer );
 
@@ -81,6 +82,12 @@ BOOL CGameRules::CanHavePlayerItem( CBasePlayer *pPlayer, CBasePlayerItem *pWeap
 	// only living players can have items
 	if( pPlayer->pev->deadflag != DEAD_NO )
 		return FALSE;
+
+	// XGLua: a duplicate SWEP may have useful secondary ammo even when its
+	// primary ammo is full or it has no primary ammo type.
+	if( XGLua_CanPickupSecondary( pPlayer, pWeapon ) &&
+		CanHaveAmmo( pPlayer, pWeapon->pszAmmo2(), pWeapon->iMaxAmmo2() ) )
+		return TRUE;
 
 	if( pWeapon->pszAmmo1() )
 	{
