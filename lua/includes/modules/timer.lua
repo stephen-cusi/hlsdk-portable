@@ -25,17 +25,6 @@ local function ErrorHandler( err )
 	return debug.traceback( tostring( err ), 2 )
 end
 
--- Extra args to forward to the currently firing callback
-local argbuf = {}
-local nargs = 0
-
-local function Runner( fn )
-	if ( nargs == 0 ) then
-		return fn()
-	end
-	return fn( unpack( argbuf, 1, nargs ) )
-end
-
 --[[---------------------------------------------------------------------------
 	Name: timer.Create( name, delay, repetitions, fn, ... )
 	Desc: Creates (or replaces) a named timer. delay is in seconds,
@@ -63,6 +52,7 @@ function timer.Create( name, delay, repetitions, fn, ... )
 		Repetitions  = repetitions or 0,
 		Fn           = fn,
 		ExtraArgs    = extra,
+		ExtraCount   = count,
 		NextTick     = CurTime() + delay,
 		Paused       = false,
 	}
@@ -114,11 +104,15 @@ function timer.Adjust( name, delay, repetitions, fn, ... )
 	if ( delay ~= nil ) then
 		local now = CurTime()
 		-- Preserve the remaining fraction of the current interval
-		local timeleft = t.NextTick - now
+		local timeleft = t.Paused and t.PausedRemaining or ( t.NextTick - now )
 		if ( timeleft < 0 ) then timeleft = 0 end
 		local frac = ( t.Delay > 0 ) and ( timeleft / t.Delay ) or 0
 		t.Delay = delay
-		t.NextTick = now + frac * delay
+		if ( t.Paused ) then
+			t.PausedRemaining = frac * delay
+		else
+			t.NextTick = now + frac * delay
+		end
 	end
 
 	if ( repetitions ~= nil ) then t.Repetitions = repetitions end
@@ -131,6 +125,7 @@ function timer.Adjust( name, delay, repetitions, fn, ... )
 			extra[ i ] = select( i, ... )
 		end
 		t.ExtraArgs = extra
+		t.ExtraCount = count
 	end
 end
 
@@ -142,7 +137,10 @@ function timer.Pause( name )
 	local t = Timers[ name ]
 	if ( t == nil ) then return false end
 
-	t.Paused = true
+	if ( not t.Paused ) then
+		t.PausedRemaining = math.max( 0, t.NextTick - CurTime() )
+		t.Paused = true
+	end
 	return true
 end
 
@@ -150,7 +148,11 @@ function timer.UnPause( name )
 	local t = Timers[ name ]
 	if ( t == nil ) then return false end
 
-	t.Paused = false
+	if ( t.Paused ) then
+		t.NextTick = CurTime() + t.PausedRemaining
+		t.PausedRemaining = nil
+		t.Paused = false
+	end
 	return true
 end
 
@@ -158,7 +160,11 @@ function timer.Toggle( name )
 	local t = Timers[ name ]
 	if ( t == nil ) then return false end
 
-	t.Paused = not t.Paused
+	if ( t.Paused ) then
+		timer.UnPause( name )
+	else
+		timer.Pause( name )
+	end
 	return not t.Paused
 end
 
@@ -170,8 +176,7 @@ function timer.Stop( name )
 	local t = Timers[ name ]
 	if ( t == nil ) then return false end
 
-	t.Paused = true
-	return true
+	return timer.Pause( name )
 end
 
 --[[---------------------------------------------------------------------------
@@ -186,6 +191,7 @@ function timer.Start( name )
 	end
 
 	t.Paused = false
+	t.PausedRemaining = nil
 	t.NextTick = CurTime() + t.Delay
 	return true
 end
@@ -253,23 +259,12 @@ function timer.Tick()
 				t.NextTick = now + t.Delay
 			end
 
-			-- Forward extra args
-			local extra = t.ExtraArgs
-			nargs = ( extra ~= nil ) and #extra or 0
-			for j = 1, nargs do
-				argbuf[ j ] = extra[ j ]
-			end
-
-			local ok, err = xpcall( Runner, ErrorHandler, t.Fn )
+			-- Explicit argument count preserves embedded and trailing nils.
+			-- Arguments live on the call stack, including for nested Tick calls.
+			local ok, err = xpcall( t.Fn, ErrorHandler, unpack( t.ExtraArgs, 1, t.ExtraCount ) )
 			if ( not ok ) then
 				print( "[XGLua] timer error in '" .. tostring( name ) .. "': " .. tostring( err ) )
 			end
-
-			-- Clear the scratch buffer so we don't hold references
-			for j = 1, nargs do
-				argbuf[ j ] = nil
-			end
-			nargs = 0
 		end
 	end
 end

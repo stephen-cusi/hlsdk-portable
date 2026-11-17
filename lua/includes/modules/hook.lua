@@ -13,7 +13,7 @@ XGLUA_MODULE_HOOK = true
 hook = hook or {}
 
 local Hooks = {}        -- Hooks[event][identifier] = function
-local ErrorCount = {}   -- ErrorCount[event.."\1"..tostring(id)] = consecutive error count
+local ErrorCount = {}   -- ErrorCount[event][identifier] = consecutive error count
 local MAX_ERRORS = 10
 
 local pairs = pairs
@@ -21,12 +21,10 @@ local tostring = tostring
 local select = select
 local unpack = unpack
 
--- Scratch buffers shared across hook.Call invocations (avoids per-call
--- allocations on the hot path; cleared before returning).
-local argbuf = {}
-local nargs = 0
-local retvals = {}
-local retcount = 0
+-- Preserve nils, including trailing nils, in callback return values.
+local function Pack( ... )
+	return { n = select( "#", ... ), ... }
+end
 
 --[[---------------------------------------------------------------------------
 	Name: hook.GetTable()
@@ -46,8 +44,12 @@ function hook.Add( event, identifier, fn )
 		print( "[XGLua] hook.Add: bad argument #1 (event expected, got nil)" )
 		return
 	end
-	if ( fn == nil ) then
-		print( "[XGLua] hook.Add: bad argument #3 (function expected, got nil) - event '" .. tostring( event ) .. "'" )
+	if ( identifier == nil ) then
+		print( "[XGLua] hook.Add: bad argument #2 (identifier expected, got nil)" )
+		return
+	end
+	if ( type( fn ) ~= "function" ) then
+		print( "[XGLua] hook.Add: bad argument #3 (function expected) - event '" .. tostring( event ) .. "'" )
 		return
 	end
 
@@ -58,7 +60,7 @@ function hook.Add( event, identifier, fn )
 	end
 
 	tbl[ identifier ] = fn
-	ErrorCount[ tostring( event ) .. "\1" .. tostring( identifier ) ] = nil
+	if ( ErrorCount[ event ] ~= nil ) then ErrorCount[ event ][ identifier ] = nil end
 end
 
 --[[---------------------------------------------------------------------------
@@ -69,40 +71,14 @@ function hook.Remove( event, identifier )
 	local tbl = Hooks[ event ]
 	if ( tbl == nil ) then return end
 
+	if ( identifier == nil ) then return end
 	tbl[ identifier ] = nil
-	ErrorCount[ tostring( event ) .. "\1" .. tostring( identifier ) ] = nil
+	if ( ErrorCount[ event ] ~= nil ) then ErrorCount[ event ][ identifier ] = nil end
 end
 
 -- Error handler for xpcall: decorates the error message with a traceback.
 local function ErrorHandler( err )
 	return debug.traceback( tostring( err ), 2 )
-end
-
--- Runs the hook function against the shared argbuf snapshot and captures
--- ALL of its return values into retvals (xpcall alone only forwards one).
-local function Runner( fn )
-	local n = nargs
-	if ( n == 0 ) then
-		retvals = { fn() }
-	elseif ( n == 1 ) then
-		retvals = { fn( argbuf[ 1 ] ) }
-	elseif ( n == 2 ) then
-		retvals = { fn( argbuf[ 1 ], argbuf[ 2 ] ) }
-	elseif ( n == 3 ) then
-		retvals = { fn( argbuf[ 1 ], argbuf[ 2 ], argbuf[ 3 ] ) }
-	elseif ( n == 4 ) then
-		retvals = { fn( argbuf[ 1 ], argbuf[ 2 ], argbuf[ 3 ], argbuf[ 4 ] ) }
-	else
-		retvals = { fn( unpack( argbuf, 1, n ) ) }
-	end
-	retcount = #retvals
-end
-
-local function ClearArgs()
-	for i = 1, nargs do
-		argbuf[ i ] = nil
-	end
-	nargs = 0
 end
 
 --[[---------------------------------------------------------------------------
@@ -119,58 +95,39 @@ function hook.Call( event, gm, ... )
 	local HookTable = Hooks[ event ]
 	if ( HookTable ~= nil ) then
 
-		-- Snapshot: calling next() over the live table breaks if callbacks
-		-- add/remove entries mid-iteration.
+		-- Keep ids and functions in separate entry tables: identifiers may
+		-- themselves be integers and must never alias array positions.
 		local snapshot = {}
-		local n = 0
-		for k, v in pairs( HookTable ) do
-			n = n + 1
-			snapshot[ n ] = k
-			snapshot[ k ] = v
+		for id, fn in pairs( HookTable ) do
+			snapshot[ #snapshot + 1 ] = { id, fn }
 		end
 
-		-- Copy varargs into argbuf once per hook.Call (not per hook)
-		local count = select( "#", ... )
-		for i = 1, count do
-			argbuf[ i ] = select( i, ... )
-		end
-		nargs = count
-
-		for i = 1, n do
-			local id = snapshot[ i ]
-			local fn = snapshot[ id ]
-			if ( fn ~= nil ) then
-				local ok, err = xpcall( Runner, ErrorHandler, fn )
-
-				local key = tostring( event ) .. "\1" .. tostring( id )
-				if ( not ok ) then
-					print( "[XGLua] hook error in " .. tostring( event ) .. "/" .. tostring( id ) .. ": " .. tostring( err ) )
-
-					local errors = ( ErrorCount[ key ] or 0 ) + 1
-					ErrorCount[ key ] = errors
-
+		for i = 1, #snapshot do
+			local id, fn = snapshot[ i ][ 1 ], snapshot[ i ][ 2 ]
+			-- xpcall forwards arguments and results in LuaJIT. The result is
+			-- local to this invocation so recursive hooks cannot overwrite it.
+			local result = Pack( xpcall( fn, ErrorHandler, ... ) )
+			local current = Hooks[ event ] and Hooks[ event ][ id ] == fn
+			if ( not result[ 1 ] ) then
+				print( "[XGLua] hook error in " .. tostring( event ) .. "/" .. tostring( id ) .. ": " .. tostring( result[ 2 ] ) )
+				if ( current ) then
+					local counts = ErrorCount[ event ]
+					if ( counts == nil ) then counts = {}; ErrorCount[ event ] = counts end
+					local errors = ( counts[ id ] or 0 ) + 1
+					counts[ id ] = errors
 					if ( errors >= MAX_ERRORS ) then
 						print( "[XGLua] hook '" .. tostring( event ) .. "/" .. tostring( id ) .. "' errored " .. errors .. " times in a row, removing it" )
-						if ( Hooks[ event ] ~= nil ) then
-							Hooks[ event ][ id ] = nil
-						end
-						ErrorCount[ key ] = nil
+						Hooks[ event ][ id ] = nil
+						counts[ id ] = nil
 					end
-				else
-					ErrorCount[ key ] = nil
-
-					-- Hook returned a value -> overrides the gamemode function
-					if ( retvals[ 1 ] ~= nil ) then
-						local vals = retvals
-						local num = retcount
-						ClearArgs()
-						return unpack( vals, 1, num )
-					end
+				end
+			else
+				if ( current and ErrorCount[ event ] ~= nil ) then ErrorCount[ event ][ id ] = nil end
+				if ( result[ 2 ] ~= nil ) then
+					return unpack( result, 2, result.n )
 				end
 			end
 		end
-
-		ClearArgs()
 	end
 
 	-- No hook returned anything: fall back to the gamemode function
