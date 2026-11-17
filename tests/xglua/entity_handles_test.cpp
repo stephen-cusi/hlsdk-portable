@@ -17,7 +17,7 @@ static int cursor;
 static int entity( lua_State *L ) {
     int i = (int)luaL_checkinteger(L, 1);
     if(i < 0 || i >= 3) return luaL_error(L,"bad index");
-    if( i == 0 ) { lua_pushnil(L); return 1; } // FNullEnt(world)
+    if( slots[i].free ) { lua_pushnil(L); return 1; }
     XGLua_PushEntityHandle(L, &slots[i], i, cursor++ % 3); return 1;
 }
 static int valid( lua_State *L ) { XGLuaEntRef *r = XGLua_TestEntityRef(L, 1); lua_pushboolean(L, r && XGLua_ValidateEnt(r)); return 1; }
@@ -52,7 +52,7 @@ int main() {
     lua_setfield(L,LUA_REGISTRYINDEX,"TestSWEP");
     bind(L,"Entity",entity); bind(L,"IsValid",valid); bind(L,"invalidate",invalidate); bind(L,"reuse",reuse); bind(L,"frame",frame);
     const char *test=R"(
-      assert(Entity(0)==nil) -- production FNullEnt treats the world as NULL
+      local world=Entity(0); assert(IsValid(world) and world==Entity(0))
       local a=Entity(1); local b=Entity(1); local c=Entity(2)
       assert(a.ClassValue=='class' and a.InheritedValue=='base' and a:NativeMethod()==17)
       assert(c.ClassValue==nil and c:NativeMethod()==17)

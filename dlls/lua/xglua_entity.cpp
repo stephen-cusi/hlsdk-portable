@@ -40,6 +40,7 @@ static edict_t *XGLua_ValidateEnt( XGLuaEntRef *ref )
 }
 
 #include "xglua_entity_handles.h"
+#include "xglua_entity_spatial.h"
 
 void XGLua_EntityFrame( lua_State *L )
 {
@@ -47,22 +48,6 @@ void XGLua_EntityFrame( lua_State *L )
 	// so retaining it between VMs cannot retain Lua state or entity pointers.
 	static int sweepIndex = 0;
 	if( L && gpGlobals ) XGLua_SweepEntityHandles( L, gpGlobals->maxEntities, 8, &sweepIndex );
-}
-
-void XGLua_PushEntity( lua_State *L, edict_t *pent )
-{
-	if( FNullEnt( pent ) )
-	{
-		lua_pushnil( L );
-		return;
-	}
-	// Cache by edict index and serial. Incremental sweeping bounds work per
-	// push while pruning native removals even if Lua never called Remove().
-	static int sweepIndex = 0;
-	int maxEntities = gpGlobals->maxEntities;
-	if( maxEntities <= 0 ) maxEntities = 1;
-	if( sweepIndex >= maxEntities ) sweepIndex = 0;
-	XGLua_PushEntityHandle( L, pent, ENTINDEX( pent ), sweepIndex++ );
 }
 
 edict_t *XGLua_CheckEntity( lua_State *L, int idx )
@@ -131,14 +116,6 @@ static int Ent_GetPos( lua_State *L )
 	return 1;
 }
 
-static int Ent_SetPos( lua_State *L )
-{
-	edict_t *pent = XGLua_CheckEntity( L, 1 );
-	extern Vector XGLua_CheckVector( lua_State *L, int idx );
-	VARS( pent )->origin = XGLua_CheckVector( L, 2 );
-	return 0;
-}
-
 static int Ent_GetAngles( lua_State *L )
 {
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
@@ -183,17 +160,6 @@ static int Ent_SetMoveType( lua_State *L )
 	return 0;
 }
 
-static int Ent_SetCollisionBounds( lua_State *L )
-{
-	edict_t *pent = XGLua_CheckEntity( L, 1 );
-	extern Vector XGLua_CheckVector( lua_State *L, int idx );
-	Vector mins = XGLua_CheckVector( L, 2 );
-	Vector maxs = XGLua_CheckVector( L, 3 );
-	VARS( pent )->mins = mins;
-	VARS( pent )->maxs = maxs;
-	return 0;
-}
-
 static int Ent_GetModel( lua_State *L )
 {
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
@@ -224,13 +190,6 @@ static int Ent_SetHealth( lua_State *L )
 {
 	VARS( XGLua_CheckEntity( L, 1 ) )->health = (float)luaL_checknumber( L, 2 );
 	return 0;
-}
-
-static int Ent_GetMaxHealth( lua_State *L )
-{
-	CBaseEntity *pEnt = Ent( L, 1 );
-	lua_pushnumber( L, pEnt->pev->max_health );
-	return 1;
 }
 
 static int Ent_SetMaxHealth( lua_State *L )
@@ -269,19 +228,6 @@ static int Ent_SetOwner( lua_State *L )
 	return 0;
 }
 
-static int Ent_GetGroundEntity( lua_State *L )
-{
-	edict_t *pent = XGLua_CheckEntity( L, 1 );
-	edict_t *pGround = VARS( pent )->groundentity;
-	if( FNullEnt( pGround ) )
-	{
-		lua_pushnil( L );
-		return 1;
-	}
-	XGLua_PushEntity( L, pGround );
-	return 1;
-}
-
 static int Ent_EmitSound( lua_State *L )
 {
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
@@ -296,21 +242,6 @@ static int Ent_StopSound( lua_State *L )
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
 	const char *name = luaL_checkstring( L, 2 );
 	STOP_SOUND( pent, CHAN_ITEM, name );
-	return 0;
-}
-
-static int Ent_Spawn( lua_State *L )
-{
-	edict_t *pent = XGLua_CheckEntity( L, 1 );
-	DispatchSpawn( pent );
-	return 0;
-}
-
-static int Ent_Remove( lua_State *L )
-{
-	CBaseEntity *pEnt = Ent( L, 1 );
-	if( pEnt )
-		pEnt->SUB_Remove();	// deferred remove, engine-safe
 	return 0;
 }
 
@@ -511,55 +442,6 @@ static int ents_Create( lua_State *L )
 	return 1;
 }
 
-static int ents_GetAll( lua_State *L )
-{
-	lua_newtable( L );
-	int n = 0;
-	for( int i = 0; i < gpGlobals->maxEntities; i++ )
-	{
-		edict_t *pent = INDEXENT( i );
-		if( !pent || pent->free || !pent->pvPrivateData )
-			continue;
-		lua_pushnumber( L, ++n );
-		XGLua_PushEntity( L, pent );
-		lua_settable( L, -3 );
-	}
-	return 1;
-}
-
-static int ents_FindByClass( lua_State *L )
-{
-	const char *cls = luaL_checkstring( L, 1 );
-	size_t len = strlen( cls );
-	bool wildcard = len > 0 && cls[len - 1] == '*';
-
-	lua_newtable( L );
-	int n = 0;
-	for( int i = 0; i < gpGlobals->maxEntities; i++ )
-	{
-		edict_t *pent = INDEXENT( i );
-		if( !pent || pent->free || !pent->pvPrivateData )
-			continue;
-		const char *c = STRING( VARS( pent )->classname );
-		if( !c || !c[0] )
-			continue;
-		if( wildcard )
-		{
-			if( strncmp( c, cls, len - 1 ) != 0 )
-				continue;
-		}
-		else
-		{
-			if( strcmp( c, cls ) != 0 )
-				continue;
-		}
-		lua_pushnumber( L, ++n );
-		XGLua_PushEntity( L, pent );
-		lua_settable( L, -3 );
-	}
-	return 1;
-}
-
 static int player_GetAll( lua_State *L )
 {
 	lua_newtable( L );
@@ -573,19 +455,6 @@ static int player_GetAll( lua_State *L )
 		XGLua_PushEntity( L, pEnt->edict() );
 		lua_settable( L, -3 );
 	}
-	return 1;
-}
-
-static int Entity_Global( lua_State *L )
-{
-	int idx = (int)luaL_checknumber( L, 1 );
-	edict_t *pent = INDEXENT( idx );
-	if( !pent || pent->free )
-	{
-		lua_pushnil( L );
-		return 1;
-	}
-	XGLua_PushEntity( L, pent );
 	return 1;
 }
 
