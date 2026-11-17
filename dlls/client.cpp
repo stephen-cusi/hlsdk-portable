@@ -197,6 +197,11 @@ void ClientPutInServer( edict_t *pEntity )
 	pPlayer->SetCustomDecalFrames( -1 ); // Assume none;
 	pPlayer->SetPrefsFromUserinfo( g_engfuncs.pfnGetInfoKeyBuffer( pEntity ) );
 
+	// XGLua: notification-only PlayerInitialSpawn, once per connection,
+	// before the first Spawn (which fires PlayerSpawn itself). Protected
+	// dispatch - Lua errors cannot interrupt the player entering the server.
+	XGLua_PlayerInitialSpawn( pPlayer );
+
 	// Allocate a CBasePlayer for pev, and call spawn
 	pPlayer->Spawn();
 

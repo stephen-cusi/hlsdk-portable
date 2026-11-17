@@ -507,6 +507,15 @@ void XGLua_PlayerSpawn( CBasePlayer *pPlayer )
 	XGLua_HookRunProtected( g_xglua_L, "PlayerSpawn", XGLua_PushSpawnedPlayer, pPlayer, XGLua_ReportError );
 }
 
+void XGLua_PlayerInitialSpawn( CBasePlayer *pPlayer )
+{
+	// hook.Run( "PlayerInitialSpawn", ply ): fired from ClientPutInServer
+	// once per connection, before the first Spawn (GMod ordering). Distinct
+	// from PlayerSpawn, which fires on every spawn/respawn. The player object
+	// is constructed and its userinfo prefs are read at this point.
+	XGLua_HookRunProtected( g_xglua_L, "PlayerInitialSpawn", XGLua_PushSpawnedPlayer, pPlayer, XGLua_ReportError );
+}
+
 BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer )
 {
 	// hook.Run( "PlayerLoadout", ply ): strict-boolean control over the vanilla
