@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "xglua.h"
+#include "xglua_vm_timer.h"
 #include "player.h"
 extern "C" {
 #include "lualib.h"
@@ -464,21 +465,7 @@ void XGLua_StartFrame( void )
 	if( !L )
 		return;
 
-	// timer.Tick() (per-frame timer driver, defined in Lua)
-	lua_getglobal( L, "timer" );
-	if( lua_istable( L, -1 ) )
-	{
-		lua_getfield( L, -1, "Tick" );
-		if( lua_isfunction( L, -1 ) )
-		{
-			if( lua_pcall( L, 0, 0, 0 ) != 0 )
-				LuaError( L, "timer.Tick" );
-		}
-		else
-			lua_pop( L, 1 );
-	}
-	else
-		lua_pop( L, 1 );
+	XGLua_RunTimerTick( L, LuaError );
 
 	XGLua_HookRun( L, "Think" );
 }
