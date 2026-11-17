@@ -23,6 +23,8 @@ extern "C" {
 #include "lauxlib.h"
 }
 #include "xglua_vm_include.h"
+// M4 first batch: server gamemode chain (header-only, this is the only TU)
+#include "xglua_gamemode.h"
 
 lua_State *g_xglua_L = NULL;
 
@@ -289,9 +291,14 @@ BOOL XGLua_IsLuaWeapon( const char *classname )
 // startup / shutdown
 //===========================================================================
 
+// gamemode selection (design doc 3.3): xgl_gamemode "<name>" in server.cfg;
+// empty means no gamemode and keeps the plain startup behavior
+static cvar_t xgl_gamemode = { "xgl_gamemode", "" };
+
 void XGLua_Init( void )
 {
 	g_engfuncs.pfnAddServerCommand( "lua_run", XGLua_LuaRun_f );
+	CVAR_REGISTER( &xgl_gamemode );
 }
 
 void XGLua_Startup( void )
@@ -422,14 +429,33 @@ void XGLua_Startup( void )
 		return;
 	}
 
-	// 2. autorun (top level, then server/ recursively)
+	// 2. gamemode chain (design doc 4.2: includes -> gamemode -> autorun).
+	// Selected via xgl_gamemode; base chain from gamemodes/<n>/<n>.txt;
+	// shared.lua then init.lua per mode, base first. Installs GM/GAMEMODE
+	// before autorun so hook.Run already has its gamemode fallback. Any
+	// failure is diagnosed and skipped - the server keeps the plain behavior.
+	{
+		const char *szMode = CVAR_GET_STRING( "xgl_gamemode" );
+		if( szMode && szMode[0] )
+		{
+			char szGMError[256];
+			XGLua_GMResult gm = XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, g_szGameDir,
+				szMode, szGMError, sizeof( szGMError ) );
+			if( gm == XGLUA_GM_OK )
+				ALERT( at_console, "[XGLua] gamemode loaded: %s\n", szMode );
+			else
+				ALERT( at_console, "[XGLua] gamemode '%s' not loaded (%d): %s\n", szMode, (int)gm, szGMError );
+		}
+	}
+
+	// 3. autorun (top level, then server/ recursively)
 	XGLua_LoadFolder( L, "autorun", false );
 	XGLua_LoadFolder( L, "autorun/server", true );
 
-	// 3. weapons — each file builds the global SWEP table
+	// 4. weapons — each file builds the global SWEP table
 	XGLua_LoadFolder( L, "weapons", false, "SWEP" );
 
-	// 3b. snapshot SWEP tables into the C++ cache (ItemInfoArray etc.)
+	// 4b. snapshot SWEP tables into the C++ cache (ItemInfoArray etc.)
 	XGLua_BuildWeaponCache( L );
 
 	ALERT( at_console, "[XGLua] scripts loaded, waiting for ServerActivate\n" );
