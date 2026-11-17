@@ -20,6 +20,7 @@ extern "C" {
 #include "lualib.h"
 #include "lauxlib.h"
 }
+#include "xglua_vm_include.h"
 
 lua_State *g_xglua_L = NULL;
 
@@ -36,7 +37,8 @@ void XGLua_GetSWEPRegistry( lua_State *L );
 
 static void LuaError( lua_State *L, const char *context )
 {
-	ALERT( at_console, "[XGLua] %s error:\n%s\n", context, lua_tostring( L, -1 ) );
+	const char *message = lua_tostring( L, -1 );
+	ALERT( at_console, "[XGLua] %s error:\n%s\n", context, message ? message : lua_typename( L, lua_type( L, -1 ) ) );
 	lua_pop( L, 1 );
 }
 
@@ -69,54 +71,31 @@ void XGLua_HookRun( lua_State *L, const char *event )
 	}
 }
 
+// Internal loads discard script results but retain/report failures. Includes
+// use a separate Lua-facing wrapper so their results and errors propagate.
+static bool XGLua_LoadScriptChecked( lua_State *L, const char *relpath )
+{
+    const int top = lua_gettop( L );
+    char relative[XGLUA_INCLUDE_PATH_MAX];
+    if( !relpath || !XGLua_IncludePath( NULL, relpath, strlen( relpath ), relative, sizeof( relative ) ) )
+    {
+        ALERT( at_console, "[XGLua] invalid script path\n" );
+        return false;
+    }
+    int status = XGLua_ExecuteScript( L, relative, XGLua_ReadDiskScript, g_szGameDir, 0 );
+    if( status != XGLUA_READ_OK )
+    {
+        LuaError( L, "script load" );
+        lua_settop( L, top );
+        return false;
+    }
+    lua_settop( L, top );
+    return true;
+}
+
 void XGLua_LoadScript( lua_State *L, const char *relpath )
 {
-	char szPath[512];
-	snprintf( szPath, sizeof( szPath ), "%s/lua/%s", g_szGameDir, relpath );
-
-	FILE *fp = fopen( szPath, "rb" );
-	if( !fp )
-	{
-		ALERT( at_console, "[XGLua] script not found: %s\n", szPath );
-		return;
-	}
-
-	fseek( fp, 0, SEEK_END );
-	long nSize = ftell( fp );
-	rewind( fp );
-	if( nSize <= 0 )
-	{
-		fclose( fp );
-		return;
-	}
-	char *pszData = (char *)malloc( nSize + 1 );
-	long nRead = (long)fread( pszData, 1, nSize, fp );
-	fclose( fp );
-	pszData[nRead] = '\0';
-
-	// skip UTF-8 BOM if present
-	const char *pszChunk = pszData;
-	long nChunk = nRead;
-	if( nChunk >= 3 && (unsigned char)pszChunk[0] == 0xEF && (unsigned char)pszChunk[1] == 0xBB )
-	{
-		pszChunk += 3;
-		nChunk -= 3;
-	}
-
-	if( luaL_loadbuffer( L, pszChunk, nChunk, relpath ) != 0 )
-	{
-		LuaError( L, "load" );
-		free( pszData );
-		return;
-	}
-	free( pszData );
-
-	if( lua_pcall( L, 0, 0, 0 ) != 0 )
-	{
-		char szCtx[256];
-		snprintf( szCtx, sizeof( szCtx ), "run %s", relpath );
-		LuaError( L, szCtx );
-	}
+    XGLua_LoadScriptChecked( L, relpath );
 }
 
 static void XGLua_LoadFolder( lua_State *L, const char *relfolder, bool recursive, const char *presetGlobal = NULL )
@@ -218,9 +197,9 @@ static int XGLua_FrameTime( lua_State *L )
 
 static int XGLua_include( lua_State *L )
 {
-	const char *path = luaL_checkstring( L, 1 );
-	XGLua_LoadScript( L, path );
-	return 0;
+	const int n = XGLua_IncludeImpl( L, XGLua_ReadDiskScript, g_szGameDir );
+	if( n < 0 ) return lua_error( L );
+	return n;
 }
 
 //===========================================================================
@@ -424,7 +403,11 @@ void XGLua_Startup( void )
 	XGLua_RegisterWeaponLibs( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
-	XGLua_LoadScript( L, "includes/init.lua" );
+	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadDiskScript, g_szGameDir, LuaError ) )
+	{
+		ALERT( at_console, "[XGLua] core init failed, VM not started\n" );
+		return;
+	}
 
 	// 2. autorun (top level, then server/ recursively)
 	XGLua_LoadFolder( L, "autorun", false );
