@@ -45,6 +45,12 @@ enum XGLuaSayResult
 };
 XGLuaSayResult XGLua_PlayerSay( CBasePlayer *pPlayer, const char *text, int teamonly, char *out, size_t outlen );
 
+// Pickup vetoes: FALSE only on a strict Lua false from the hook chain;
+// every other outcome (true, nil, non-boolean, no handlers, Lua error)
+// keeps the native allow behavior.
+BOOL XGLua_PlayerCanPickupWeapon( CBasePlayer *pPlayer, CBaseEntity *pWeapon ); // CBasePlayerItem::AddToPlayer entry
+BOOL XGLua_PlayerCanPickupItem( CBasePlayer *pPlayer, CBaseEntity *pItem );     // CItem::ItemTouch before MyTouch
+
 //
 // Script loading / dispatch
 //

@@ -30,6 +30,7 @@
 #include "soundent.h"
 #include "decals.h"
 #include "gamerules.h"
+#include "lua/xglua.h"	// XGLua: pickup veto in AddToPlayer
 
 extern CGraph WorldGraph;
 extern int gEvilImpulse101;
@@ -708,6 +709,17 @@ void CBasePlayerItem::DestroyItem( void )
 
 int CBasePlayerItem::AddToPlayer( CBasePlayer *pPlayer )
 {
+	// XGLua: PlayerCanPickupWeapon veto before any inventory state is
+	// touched. Only a strict Lua false denies; everything else (and no
+	// Lua at all) keeps the native allow path identical. AddPlayerItem is
+	// shared by direct, ground and weaponbox pickups.
+	m_bXGLuaPickupDenied = false;
+	if( !XGLua_PlayerCanPickupWeapon( pPlayer, this ) )
+	{
+		m_bXGLuaPickupDenied = true;
+		return FALSE;
+	}
+
 	m_pPlayer = pPlayer;
 
 	return TRUE;
@@ -722,6 +734,7 @@ void CBasePlayerItem::Drop( void )
 
 void CBasePlayerItem::Kill( void )
 {
+	m_bXGLuaPickupDenied = false;
 	SetTouch( NULL );
 	SetThink( &CBaseEntity::SUB_Remove );
 	pev->nextthink = gpGlobals->time + 0.1f;
@@ -764,6 +777,13 @@ int CBasePlayerWeapon::AddDuplicate( CBasePlayerItem *pOriginal )
 int CBasePlayerWeapon::AddToPlayer( CBasePlayer *pPlayer )
 {
 	int bResult = CBasePlayerItem::AddToPlayer( pPlayer );
+
+	// XGLua: when the pickup was denied above, skip the weapon-bit and
+	// ammo bookkeeping so a denial leaves no ghost bit behind. Natively
+	// the base always returned TRUE here, so this changes nothing
+	// without the Lua veto.
+	if( !bResult )
+		return FALSE;
 
 	pPlayer->pev->weapons |= ( 1 << m_iId );
 
@@ -1389,6 +1409,7 @@ void CWeaponBox::Touch( CBaseEntity *pOther )
 		if( m_rgpPlayerItems[i] )
 		{
 			CBasePlayerItem *pItem;
+			CBasePlayerItem *pDenied = NULL;
 
 			// have at least one weapon in this slot
 			while( m_rgpPlayerItems[i] )
@@ -1397,16 +1418,32 @@ void CWeaponBox::Touch( CBaseEntity *pOther )
 
 				pItem = m_rgpPlayerItems[i];
 				m_rgpPlayerItems[i] = m_rgpPlayerItems[i]->m_pNext;// unlink this weapon from the box
+				pItem->m_pNext = NULL;
+				pItem->m_bXGLuaPickupDenied = false;
 
 				if( pPlayer->AddPlayerItem( pItem ) )
 				{
 					pItem->AttachToPlayer( pPlayer );
 				}
+				else if( pItem->m_bXGLuaPickupDenied )
+				{
+					// AddPlayerItem normally consumes a failed duplicate from a
+					// weaponbox. A Lua veto is different: keep that weapon packed
+					// and retryable instead of orphaning its hidden edict when the
+					// box is removed.
+					pItem->m_bXGLuaPickupDenied = false;
+					pItem->m_pNext = pDenied;
+					pDenied = pItem;
+				}
 			}
+			m_rgpPlayerItems[i] = pDenied;
 		}
 	}
 
 	EMIT_SOUND( pOther->edict(), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM );
+	for( i = 0; i < MAX_ITEM_TYPES; ++i )
+		if( m_rgpPlayerItems[i] )
+			return; // Lua-denied weapons remain inside the touchable box
 	SetTouch( NULL );
 	UTIL_Remove(this);
 }

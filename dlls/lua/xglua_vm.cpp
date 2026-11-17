@@ -604,3 +604,37 @@ XGLuaSayResult XGLua_PlayerSay( CBasePlayer *pPlayer, const char *text, int team
 	snprintf( out, outlen, "%s", szResult );
 	return XGLUA_SAY_REPLACED;
 }
+
+// Pickup vetoes (PlayerCanPickupWeapon / PlayerCanPickupItem): deny-style
+// decisions over the shared protected hook core - only a strict Lua false
+// from the hook chain returns FALSE; true, nil, non-boolean results,
+// missing handlers and reported Lua errors all keep the native allow
+// behavior. Hook priority and the GAMEMODE fallback stay inside hook.Run;
+// hook-internal errors are contained by hook.lua and the chain continues.
+struct XGLua_PickupArgs { CBasePlayer *player; CBaseEntity *item; };
+
+static int XGLua_PushPickupArgs( lua_State *L, void *ctx )
+{
+	XGLua_PickupArgs *a = (XGLua_PickupArgs *)ctx;
+	XGLua_PushEntity( L, a->player->edict() );
+	XGLua_PushEntity( L, a->item->edict() );
+	return 2;
+}
+
+static BOOL XGLua_PickupVeto( const char *event, CBasePlayer *pPlayer, CBaseEntity *pItem )
+{
+	if( !g_xglua_L || !pPlayer || !pItem )
+		return FALSE;
+	XGLua_PickupArgs args = { pPlayer, pItem };
+	return XGLua_HookDenyBool( g_xglua_L, event, XGLua_PushPickupArgs, &args, XGLua_ReportError ) ? FALSE : TRUE;
+}
+
+BOOL XGLua_PlayerCanPickupWeapon( CBasePlayer *pPlayer, CBaseEntity *pWeapon )
+{
+	return XGLua_PickupVeto( "PlayerCanPickupWeapon", pPlayer, pWeapon );
+}
+
+BOOL XGLua_PlayerCanPickupItem( CBasePlayer *pPlayer, CBaseEntity *pItem )
+{
+	return XGLua_PickupVeto( "PlayerCanPickupItem", pPlayer, pItem );
+}

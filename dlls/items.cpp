@@ -28,6 +28,7 @@
 #include "skill.h"
 #include "items.h"
 #include "gamerules.h"
+#include "lua/xglua.h"	// XGLua: pickup veto in ItemTouch
 
 extern int gmsgItemPickup;
 
@@ -120,6 +121,12 @@ void CItem::ItemTouch( CBaseEntity *pOther )
 		// no? Ignore the touch.
 		return;
 	}
+
+	// XGLua: PlayerCanPickupItem veto before MyTouch mutates the player.
+	// A denial behaves exactly like the CanHaveItem ignore above: the
+	// item stays and a later touch retries. Strict-false-only deny.
+	if( !XGLua_PlayerCanPickupItem( pPlayer, this ) )
+		return;
 
 	if( MyTouch( pPlayer ) )
 	{

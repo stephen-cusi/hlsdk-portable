@@ -3757,6 +3757,9 @@ void CBasePlayer::CheatImpulseCommands( int iImpulse )
 //
 int CBasePlayer::AddPlayerItem( CBasePlayerItem *pItem )
 {
+	// Clear transient veto state even when duplicate handling bypasses
+	// CBasePlayerItem::AddToPlayer.
+	pItem->m_bXGLuaPickupDenied = false;
 	CBasePlayerItem *pInsert;
 
 	pInsert = m_rgpPlayerItems[pItem->iItemSlot()];

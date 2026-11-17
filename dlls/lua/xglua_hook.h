@@ -54,14 +54,15 @@ static void XGLua_HookRunProtected( lua_State *L, const char *event,
 	XGLua_ProtectedCall( L, XGLua_HookRunCore, &rc, onerror, szCtx );
 }
 
-// hook.Run dispatch whose first result is reduced to a strict boolean.
-// Only a genuine Lua true (LUA_TBOOLEAN) counts: numbers, strings and nil do
-// not, matching the explicit-opt-in contract of decision hooks like
-// PlayerLoadout where anything else must fall back to vanilla behavior.
+// hook.Run dispatch whose first result is reduced to a tri-state boolean:
+// result 1 only for a genuine Lua true (LUA_TBOOLEAN), result 2 only for a
+// genuine Lua false, 0 for nil/non-boolean/no handlers. Numbers, strings and
+// nil never count as either, matching the explicit-opt-in contract of
+// decision hooks where anything else must fall back to vanilla behavior.
 // Hook priority and the GAMEMODE fallback stay inside hook.Run: a plain hook
 // returning non-nil terminates the chain before the GM function runs. A
 // raising GM function (hook.lua calls it unprotected) is reported through
-// onerror and yields false; the stack is restored either way.
+// onerror and yields "no result"; the stack is restored either way.
 struct XGLua_HookBoolCtx { const char *event; XGLua_HookArgPush pushargs; void *argctx; int result; };
 
 static int XGLua_HookRunBoolCore( lua_State *L, void *ctx )
@@ -78,8 +79,8 @@ static int XGLua_HookRunBoolCore( lua_State *L, void *ctx )
 	const int nargs = 1 + ( rc->pushargs ? rc->pushargs( L, rc->argctx ) : 0 );
 	if( lua_pcall( L, nargs, 1, 0 ) != 0 )
 		return lua_error( L );		// report through the outer protected frame
-	if( lua_type( L, -1 ) == LUA_TBOOLEAN && lua_toboolean( L, -1 ) )
-		rc->result = 1;
+	if( lua_type( L, -1 ) == LUA_TBOOLEAN )
+		rc->result = lua_toboolean( L, -1 ) ? 1 : 2;
 	return 0;	// outer frame discards the result value
 }
 
@@ -94,7 +95,27 @@ static bool XGLua_HookRunBool( lua_State *L, const char *event,
 	XGLua_HookBoolCtx rc = { event, pushargs, argctx, 0 };
 	if( !XGLua_ProtectedCall( L, XGLua_HookRunBoolCore, &rc, onerror, szCtx ) )
 		return false;
-	return rc.result != 0;
+	return rc.result == 1;
+}
+
+// Deny-style companion over the same protected core: true only when the hook
+// chain returned a strict Lua false. Everything else - true, nil, non-boolean
+// values, no handlers at all, or a Lua error (reported through onerror) -
+// means "no objection", so the native allow path runs. Used by veto hooks
+// like PlayerCanPickupWeapon / PlayerCanPickupItem where the failure mode
+// must never lock players out of the game.
+static bool XGLua_HookDenyBool( lua_State *L, const char *event,
+	XGLua_HookArgPush pushargs, void *argctx,
+	void ( *onerror )( lua_State *, const char * ) )
+{
+	if( !L || !event )
+		return false;
+	char szCtx[128];
+	snprintf( szCtx, sizeof( szCtx ), "hook.Run(\"%s\")", event );
+	XGLua_HookBoolCtx rc = { event, pushargs, argctx, 0 };
+	if( !XGLua_ProtectedCall( L, XGLua_HookRunBoolCore, &rc, onerror, szCtx ) )
+		return false;
+	return rc.result == 2;
 }
 
 // hook.Run dispatch capturing a string result for text-rewrite hooks like
