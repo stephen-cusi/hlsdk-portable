@@ -104,6 +104,16 @@ void ClientDisconnect( edict_t *pEntity )
 	if( g_fGameOver )
 		return;
 
+	// XGLua: notification-only PlayerDisconnected, dispatched once from
+	// the single safe point before the edict gets neutralized (flags,
+	// solid and effects still intact). Protected dispatch - Lua errors
+	// are reported but cannot block the native disconnect cleanup.
+	{
+		CBaseEntity *pPlayer = CBaseEntity::Instance( pEntity );
+		if( pPlayer && pPlayer->IsPlayer() )
+			XGLua_PlayerDisconnected( (CBasePlayer *)pPlayer );
+	}
+
 	char text[256] = "";
 	if( pEntity->v.netname )
 		safe_snprintf( text, sizeof( text ), "- %s has left the game\n", STRING( pEntity->v.netname ));
@@ -365,7 +375,7 @@ void Host_Say( edict_t *pEntity, int teamonly )
 		p = szTemp;
 	}
 
-	// remove quotes if present
+	// remove quotes if present (native command text only)
 	if( p && *p == '"' )
 	{
 		p++;
@@ -374,6 +384,26 @@ void Host_Say( edict_t *pEntity, int teamonly )
 
 	if( !p || !p[0] || !Q_UnicodeValidate ( p ) )
 		return;  // no character found, so say nothing
+
+	// XGLua: run only after native rate, empty-text and Unicode checks, so
+	// rate-limited or invalid input cannot invoke Lua. A swallowed valid
+	// message still consumes the native chat interval.
+	char szReplaced[256];
+	XGLuaSayResult say = XGLua_PlayerSay( player, p, teamonly, szReplaced, sizeof( szReplaced ) );
+	if( say == XGLUA_SAY_SWALLOWED )
+	{
+		player->m_flNextChatTime = gpGlobals->time + CHAT_INTERVAL;
+		return;
+	}
+	if( say == XGLUA_SAY_REPLACED )
+	{
+		p = szReplaced;
+		if( !p[0] || !Q_UnicodeValidate( p ) )
+		{
+			player->m_flNextChatTime = gpGlobals->time + CHAT_INTERVAL;
+			return;
+		}
+	}
 
 	// turn on color set 2  (color on,  no sound)
 	if( player->IsObserver() && ( teamonly ) )

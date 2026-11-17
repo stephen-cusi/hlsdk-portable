@@ -34,6 +34,16 @@ void XGLua_PlayerSpawn( CBasePlayer *pPlayer );     // CBasePlayer::Spawn: hook 
 void XGLua_PlayerInitialSpawn( CBasePlayer *pPlayer ); // ClientPutInServer: hook PlayerInitialSpawn
 BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer );   // gamerules PlayerSpawn: hook PlayerLoadout
 void XGLua_PlayerDeath( CBasePlayer *victim, entvars_t *inflictor, entvars_t *attacker ); // CBasePlayer::Killed: hook PlayerDeath
+void XGLua_PlayerDisconnected( CBasePlayer *pPlayer );               // ClientDisconnect: hook PlayerDisconnected
+
+// ClientCommand say/say_team result for hook PlayerSay (xglua_vm.cpp)
+enum XGLuaSayResult
+{
+	XGLUA_SAY_PASSTHROUGH = 0,	// no hook result / non-string / Lua error: native Host_Say with the original text
+	XGLUA_SAY_REPLACED,		// hook returned a non-empty string: send that instead
+	XGLUA_SAY_SWALLOWED		// hook returned "": drop the message entirely
+};
+XGLuaSayResult XGLua_PlayerSay( CBasePlayer *pPlayer, const char *text, int teamonly, char *out, size_t outlen );
 
 //
 // Script loading / dispatch

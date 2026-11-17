@@ -563,3 +563,44 @@ void XGLua_PlayerDeath( CBasePlayer *victim, entvars_t *inflictor, entvars_t *at
 	XGLua_DeathArgs args = { victim, inflictor, attacker };
 	XGLua_HookRunProtected( g_xglua_L, "PlayerDeath", XGLua_PushDeathArgs, &args, XGLua_ReportError );
 }
+
+void XGLua_PlayerDisconnected( CBasePlayer *pPlayer )
+{
+	// hook.Run( "PlayerDisconnected", ply ): notification-only, dispatched
+	// from ClientDisconnect before the edict is neutralized. Errors are
+	// reported and contained - they cannot block the native cleanup.
+	if( !g_xglua_L || !pPlayer )
+		return;
+	XGLua_HookRunProtected( g_xglua_L, "PlayerDisconnected", XGLua_PushSpawnedPlayer, pPlayer, XGLua_ReportError );
+}
+
+// hook.Run( "PlayerSay", ply, text, teamOnly ): text-rewrite hook for the
+// say / say_team client commands. Host_Say passes text only after its native
+// rate, empty-message and Unicode checks. A non-empty string replaces the
+// chat text, an empty string swallows it, and anything else (nil, non-string,
+// Lua error) passes the original text through untouched.
+struct XGLua_SayArgs { CBasePlayer *player; const char *text; int teamonly; };
+
+static int XGLua_PushSayArgs( lua_State *L, void *ctx )
+{
+	XGLua_SayArgs *a = (XGLua_SayArgs *)ctx;
+	XGLua_PushEntity( L, a->player->edict() );
+	lua_pushstring( L, a->text );
+	lua_pushboolean( L, a->teamonly );
+	return 3;
+}
+
+XGLuaSayResult XGLua_PlayerSay( CBasePlayer *pPlayer, const char *text, int teamonly, char *out, size_t outlen )
+{
+	if( !g_xglua_L || !pPlayer || !text || !out || !outlen )
+		return XGLUA_SAY_PASSTHROUGH;
+
+	XGLua_SayArgs args = { pPlayer, text, teamonly != 0 };
+	char szResult[256];
+	if( !XGLua_HookRunString( g_xglua_L, "PlayerSay", XGLua_PushSayArgs, &args, szResult, sizeof( szResult ), XGLua_ReportError ) )
+		return XGLUA_SAY_PASSTHROUGH;
+	if( !szResult[0] )
+		return XGLUA_SAY_SWALLOWED;
+	snprintf( out, outlen, "%s", szResult );
+	return XGLUA_SAY_REPLACED;
+}
