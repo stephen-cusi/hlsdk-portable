@@ -16,6 +16,7 @@
 
 #include "xglua.h"
 #include "xglua_swep_bridge.h"
+#include "xglua_swep_order.h"
 #include "weapons.h"
 #include "player.h"
 #include "xglua_ballistics.h"
@@ -597,9 +598,14 @@ void XGLua_BuildWeaponCache( lua_State *L )
 		return;
 	}
 
-	lua_pushnil( L );
-	while( lua_next( L, -2 ) != 0 )
+	// lua_next iteration order changes with each VM; IDs and ammo slots are
+	// serialized as numeric indices, so register classnames in a stable order.
+	const int count = XGLua_PushSortedWeaponNames( L, -1 );
+	for( int nameIndex = 1; nameIndex <= count; ++nameIndex )
 	{
+		lua_rawgeti( L, -1, nameIndex );
+		lua_pushvalue( L, -1 );
+		lua_rawget( L, -4 );
 		// [-2] key (classname), [-1] SWEP table
 		if( lua_isstring( L, -2 ) && lua_istable( L, -1 ) )
 		{
@@ -607,26 +613,26 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( g_nSWEPs >= XGLUA_MAX_SWEP )
 			{
 				ALERT( at_console, "[XGLua] too many SWEPs, ignoring %s\n", classname );
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 
 			lua_getfield( L, -1, "Abstract" );
 			bool abstract = lua_toboolean( L, -1 ) != 0;
 			lua_pop( L, 1 );
-			if( abstract ) { lua_pop( L, 1 ); continue; }
+			if( abstract ) { lua_pop( L, 2 ); continue; }
 			char soundPaths[XGLUA_SOUND_PER_WEAPON][XGLUA_SOUND_PATH_BYTES] = {};
 			int soundCount = 0;
 			if( !XGLua_ReadPrecacheSounds( L, -1, soundPaths, &soundCount ) ||
 				!XGLua_ValidateSoundResources( soundPaths, soundCount, g_XGLuaSounds, g_nXGLuaSounds, XGLua_SoundExists ) )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid, missing, or excessive PrecacheSounds; weapon not registered\n", classname );
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 					int id = 16;
 			while( id < WEAPON_SUIT && CBasePlayerItem::ItemInfoArray[id].iId ) ++id;
-			if( id >= WEAPON_SUIT ) { ALERT( at_console, "[XGLua] no free weapon ID for %s\n", classname ); lua_pop( L, 1 ); continue; }
+			if( id >= WEAPON_SUIT ) { ALERT( at_console, "[XGLua] no free weapon ID for %s\n", classname ); lua_pop( L, 2 ); continue; }
 			XGLuaSWEPInfo *swep = &g_SWEPs[g_nSWEPs++];
 			memset( swep, 0, sizeof( XGLuaSWEPInfo ) );
 			swep->id = id;
@@ -749,7 +755,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid ClipSize/Ammo; use -1 for clipless, positive clip with reserve ammo\n", classname );
 				--g_nSWEPs;
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 			swep->maxammo = 68;	// default reserve limit for new ammo
@@ -783,7 +789,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid secondary ammo configuration or conflicting ammo limit\n", classname );
 				--g_nSWEPs;
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 			// GoldSrc wraps the ammo registry to slot 0 on overflow; refuse to
@@ -801,7 +807,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			{
 				ALERT( at_console, "[XGLua] no free ammo slots for %s\n", classname );
 				--g_nSWEPs;
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 
@@ -823,7 +829,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			{
 				ALERT( at_console, "[XGLua] no free HUD slot for %s\n", classname );
 				--g_nSWEPs;
-				lua_pop( L, 1 );
+				lua_pop( L, 2 );
 				continue;
 			}
 
@@ -876,8 +882,9 @@ void XGLua_BuildWeaponCache( lua_State *L )
 
 			ALERT( at_console, "[XGLua] registered SWEP: %s\n", swep->classname );
 		}
-		lua_pop( L, 1 );
+		lua_pop( L, 2 );
 	}
+	lua_pop( L, 1 );	// sorted names
 	lua_pop( L, 1 );	// GetStored table
 	lua_pop( L, 1 );	// weapons table
 }
