@@ -239,6 +239,41 @@ static void XGLua_LuaRun_f( void )
 }
 
 //===========================================================================
+// lua_openscript console command
+//===========================================================================
+
+// Run one script from the mod's lua/ tree. The path is validated by the
+// production include rules (XGLua_IncludePath inside XGLua_LoadScriptChecked):
+// relative to lua/, no absolute paths, no drive letters, no traversal out
+// of the tree, length- and character-bounded. Execution goes through the
+// protected XGLua_ExecuteScript with the standard error reporter, so
+// missing / unreadable files, syntax errors and runtime errors all leave
+// the stack restored and name the script. Repeated runs and failures leave
+// the VM usable. No permission gating exists - like lua_run this is a
+// trusted-server command.
+static void XGLua_LuaOpenScript_f( void )
+{
+	if( !g_xglua_L )
+	{
+		ALERT( at_console, "[XGLua] no Lua VM running\n" );
+		return;
+	}
+	if( CMD_ARGC() < 2 )
+	{
+		ALERT( at_console, "usage: lua_openscript <path relative to lua/>\n" );
+		return;
+	}
+
+	const char *path = CMD_ARGV( 1 );
+	if( !XGLua_LoadScriptChecked( g_xglua_L, path ) )
+	{
+		ALERT( at_console, "[XGLua] lua_openscript: failed: %s\n", path );
+		return;
+	}
+	ALERT( at_console, "[XGLua] lua_openscript: ran %s\n", path );
+}
+
+//===========================================================================
 // SWEP registry helpers
 //===========================================================================
 
@@ -298,6 +333,7 @@ static cvar_t xgl_gamemode = { "xgl_gamemode", "" };
 void XGLua_Init( void )
 {
 	g_engfuncs.pfnAddServerCommand( "lua_run", XGLua_LuaRun_f );
+	g_engfuncs.pfnAddServerCommand( "lua_openscript", XGLua_LuaOpenScript_f );
 	CVAR_REGISTER( &xgl_gamemode );
 }
 
