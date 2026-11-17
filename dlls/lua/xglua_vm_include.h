@@ -73,6 +73,9 @@ static int XGLua_ExecuteScript(lua_State *L, const char *rel, XGLuaReadScript re
     char name[XGLUA_INCLUDE_PATH_MAX+6];
     int written=snprintf(name,sizeof(name),"@lua/%s",rel);
     if (written<0 || (size_t)written>=sizeof(name)) { free(data); lua_pushliteral(L,"include: source path too long"); return (int)XGLUA_READ_ERROR; }
+    // luaL_loadbuffer is protected internally: lj_load.c lua_loadx runs the
+    // parser via lj_vm_cpcall, so syntax and out-of-memory errors return a
+    // status code instead of raising.
     int code=luaL_loadbuffer(L,chunk,len,name);
     free(data);
     if (code) return (int)XGLUA_READ_ERROR;

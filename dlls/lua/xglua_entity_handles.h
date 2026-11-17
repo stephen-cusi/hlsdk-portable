@@ -18,12 +18,17 @@ static XGLuaEntRef *XGLua_TestEntityRef( lua_State *L, int idx )
 
 static void XGLua_PushEntityCache( lua_State *L )
 {
-    lua_getfield( L, LUA_REGISTRYINDEX, XGLUA_ENTITY_CACHE );
+    // Raw registry access: engine-internal state, also read from engine
+    // callbacks where a planted registry metatable must not raise.
+    lua_pushstring( L, XGLUA_ENTITY_CACHE );
+    lua_rawget( L, LUA_REGISTRYINDEX );
     if( lua_istable( L, -1 ) ) return;
     lua_pop( L, 1 );
     lua_newtable( L );
     lua_pushvalue( L, -1 );
-    lua_setfield( L, LUA_REGISTRYINDEX, XGLUA_ENTITY_CACHE );
+    lua_pushstring( L, XGLUA_ENTITY_CACHE );
+    lua_insert( L, -2 );
+    lua_rawset( L, LUA_REGISTRYINDEX );
 }
 
 // One slot per acquisition amortises clean-up. A slot reused before its turn
@@ -42,7 +47,8 @@ static void XGLua_SweepEntitySlot( lua_State *L, int cache, int index )
 static void XGLua_SweepEntityHandles( lua_State *L, int maxSlots, int budget, int *cursor )
 {
     if( !L || !cursor || maxSlots <= 0 || budget <= 0 ) return;
-    lua_getfield( L, LUA_REGISTRYINDEX, XGLUA_ENTITY_CACHE );
+    lua_pushstring( L, XGLUA_ENTITY_CACHE );
+    lua_rawget( L, LUA_REGISTRYINDEX );
     if( !lua_istable( L, -1 ) ) { lua_pop( L, 1 ); return; }
     int cache = lua_gettop( L );
     if( *cursor < 0 || *cursor >= maxSlots ) *cursor = 0;

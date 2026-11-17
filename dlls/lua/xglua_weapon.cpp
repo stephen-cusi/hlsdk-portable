@@ -211,21 +211,25 @@ int CLuaWeapon::Restore( CRestore &restore )
     return 1;
 }
 
+static int XGLua_PushWeaponEntity( lua_State *L, void *ctx )
+{
+	XGLua_PushEntity( L, ( (CLuaWeapon *)ctx )->edict() );
+	return 1;
+}
+
 static void CallWeaponMethod( CLuaWeapon *w, const char *method )
 {
 	lua_State *L = g_xglua_L;
 	if( !L || !w )
 		return;
 
-	if( !XGLua_PushSWEPMethod( L, w->m_szLuaClass, method ) )
-		return;
-	XGLua_PushEntity( L, w->edict() );
-
-	if( lua_pcall( L, 1, 0, 0 ) != 0 )
-	{
-		ALERT( at_console, "[XGLua] SWEP:%s error:\n%s\n", method, lua_tostring( L, -1 ) );
-		lua_pop( L, 1 );
-	}
+	// Protected dispatch: the inherited lookup (SWEP __index runs the Base
+	// resolver in weapons.lua), the entity handle push, and the call share
+	// one lua_pcall frame - no error path can escape into the engine.
+	char szCtx[128];
+	snprintf( szCtx, sizeof( szCtx ), "SWEP:%s", method );
+	XGLua_CallSWEPMethod( L, w->m_szLuaClass, method,
+		XGLua_PushWeaponEntity, w, XGLua_ReportError, szCtx );
 }
 
 void CLuaWeapon::InitFromCache( const char *classname )
@@ -671,28 +675,182 @@ void XGLua_RegisterWeaponLibs( lua_State *L )
 	lua_pop( L, 1 );
 }
 
-void XGLua_BuildWeaponCache( lua_State *L )
+// Field reads for one SWEP run in their own protected call: a raising
+// __index (the Base inheritance resolver in weapons.lua) skips only this
+// weapon instead of aborting the whole registration pass.
+struct XGLua_SWEPFieldCtx
 {
-	g_nSWEPs = 0;
-	g_nXGLuaSounds = 0;
+	int tableRef;		// temporary LUA_REGISTRYINDEX reference
+	const char *classname;
+	XGLuaSWEPInfo *slot;
+	char ( *sounds )[XGLUA_SOUND_PATH_BYTES];
+	int *soundCount;
+	bool soundsValid;
+	bool abstract;
+	bool explicitSecondaryMax;
+	bool validSecondary;
+};
+
+static char g_szSWEPFieldError[256];
+static void XGLua_SWEPFieldError( lua_State *L, const char *context )
+{
+	// runs after the protected call returned: strings only, no allocation
+	snprintf( g_szSWEPFieldError, sizeof( g_szSWEPFieldError ), "%s", XGLua_ErrorText( L, -1 ) );
+	lua_pop( L, 1 );
+}
+
+static int XGLua_SWEPFieldCore( lua_State *L, void *ud )
+{
+	XGLua_SWEPFieldCtx *fc = (XGLua_SWEPFieldCtx *)ud;
+	XGLuaSWEPInfo *swep = fc->slot;
+	XGLua_PushSWEPTableRef( L, fc->tableRef );
+	const int table = lua_gettop( L );
+	const char *classname = fc->classname;
+
+	fc->abstract = XGLua_SWEPIsAbstract( L, table );
+
+	fc->soundsValid = XGLua_ReadPrecacheSounds( L, table, fc->sounds, fc->soundCount );
+
+	lua_getfield( L, table, "ViewModel" );
+	if( lua_isstring( L, -1 ) )
+		strncpy( swep->viewmodel, lua_tostring( L, -1 ), sizeof( swep->viewmodel ) - 1 );
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "WorldModel" );
+	if( lua_isstring( L, -1 ) )
+		strncpy( swep->worldmodel, lua_tostring( L, -1 ), sizeof( swep->worldmodel ) - 1 );
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "PlayerModel" );
+	if( lua_isstring( L, -1 ) )
+		strncpy( swep->playermodel, lua_tostring( L, -1 ), sizeof( swep->playermodel ) - 1 );
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "DeploySequence" );
+	if( lua_isnumber( L, -1 ) )
+	{
+		double sequence = lua_tonumber( L, -1 );
+		if( std::isfinite( sequence ) && sequence >= 0 && sequence <= 255 && floor( sequence ) == sequence )
+			swep->deploysequence = (int)sequence;
+		else
+			ALERT( at_console, "[XGLua] %s: invalid DeploySequence, using 7\n", classname );
+	}
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "AnimExtension" );
+	if( lua_isstring( L, -1 ) )
+	{
+		const char *extension = lua_tostring( L, -1 );
+		if( *extension && strlen( extension ) < sizeof( swep->animextension ) )
+			strcpy( swep->animextension, extension );
+		else
+			ALERT( at_console, "[XGLua] %s: invalid AnimExtension, using onehanded\n", classname );
+	}
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "Slot" );
+	swep->slot = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 2;
+	swep->slot = Q_max( 0, Q_min( swep->slot, MAX_WEAPON_SLOTS - 1 ) );
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "SlotPos" );
+	swep->slotpos = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 1;
+	swep->slotpos = Q_max( 0, Q_min( swep->slotpos, MAX_WEAPON_SLOTS - 1 ) );
+	lua_pop( L, 1 );
+
+	fc->explicitSecondaryMax = false;
+	fc->validSecondary = true;
+	swep->maxammo2 = 68;
+	// SWEP.Primary sub-table
+	lua_getfield( L, table, "Primary" );
+	if( lua_istable( L, -1 ) )
+	{
+		lua_getfield( L, -1, "Automatic" );
+		swep->primaryAutomatic = lua_toboolean( L, -1 ) != 0;
+		lua_pop( L, 1 );
+		lua_getfield( L, -1, "ClipSize" );
+		swep->clipsize = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : -1;
+		lua_pop( L, 1 );
+
+		lua_getfield( L, -1, "DefaultClip" );
+		swep->defaultclip = XGLua_InitialWeaponAmmo( lua_isnumber( L, -1 ), (int)lua_tonumber( L, -1 ), swep->clipsize );
+		lua_pop( L, 1 );
+
+		lua_getfield( L, -1, "Ammo" );
+		if( lua_isstring( L, -1 ) )
+			strncpy( swep->ammo1, lua_tostring( L, -1 ), sizeof( swep->ammo1 ) - 1 );
+		lua_pop( L, 1 );
+	}
+	lua_pop( L, 1 );
+
+	lua_getfield( L, table, "Secondary" );
+	if( lua_istable( L, -1 ) )
+	{
+		lua_getfield( L, -1, "Automatic" );
+		swep->secondaryAutomatic = lua_toboolean( L, -1 ) != 0;
+		lua_pop( L, 1 );
+		lua_getfield( L, -1, "Ammo" );
+		if( lua_isstring( L, -1 ) ) strncpy( swep->ammo2, lua_tostring( L, -1 ), sizeof( swep->ammo2 ) - 1 );
+		lua_pop( L, 1 );
+		lua_getfield( L, -1, "ClipSize" );
+		if( !lua_isnil( L, -1 ) && ( !lua_isnumber( L, -1 ) || lua_tonumber( L, -1 ) != -1 ) ) fc->validSecondary = false;
+		lua_pop( L, 1 );
+		lua_getfield( L, -1, "DefaultAmmo" );
+		if( !lua_isnil( L, -1 ) )
+		{
+			double amount = lua_tonumber( L, -1 );
+			if( !lua_isnumber( L, -1 ) || !std::isfinite( amount ) || amount < 0 || amount > 254 || floor( amount ) != amount ) fc->validSecondary = false;
+			else swep->defaultammo2 = (int)amount;
+		}
+		lua_pop( L, 1 );
+		lua_getfield( L, -1, "MaxAmmo" );
+		if( !lua_isnil( L, -1 ) )
+		{
+			fc->explicitSecondaryMax = true;
+			double amount = lua_tonumber( L, -1 );
+			if( !lua_isnumber( L, -1 ) || !std::isfinite( amount ) || amount < 1 || amount > 254 || floor( amount ) != amount ) fc->validSecondary = false;
+			else swep->maxammo2 = (int)amount;
+		}
+		lua_pop( L, 1 );
+	}
+	lua_pop( L, 1 );
+	return 0;
+}
+
+struct XGLua_StoreSWEPTableCtx { int tableRef; const char *classname; };
+static int XGLua_StoreSWEPTableCore( lua_State *L, void *ud )
+{
+	XGLua_StoreSWEPTableCtx *sc = (XGLua_StoreSWEPTableCtx *)ud;
+	XGLua_PushSWEPTableRef( L, sc->tableRef );
+	if( !XGLua_StoreSWEPTable( L, lua_gettop( L ), sc->classname ) )
+	{
+		lua_pushliteral( L, "failed to store SWEP table" );
+		return lua_error( L );
+	}
+	return 0;
+}
+
+static int XGLua_BuildWeaponCacheCore( lua_State *L, void *ctx )
+{
+	(void)ctx;
 	// iterate weapons.GetStored() (Lua side, filled by weapons.Register)
 	lua_getglobal( L, "weapons" );
 	if( !lua_istable( L, -1 ) )
 	{
 		lua_pop( L, 1 );
-		return;
+		return 0;
 	}
 	lua_getfield( L, -1, "GetStored" );
 	if( !lua_isfunction( L, -1 ) )
 	{
 		lua_pop( L, 2 );
-		return;
+		return 0;
 	}
 	if( lua_pcall( L, 0, 1, 0 ) != 0 )
 	{
-		ALERT( at_console, "[XGLua] weapons.GetStored error: %s\n", lua_tostring( L, -1 ) );
+		ALERT( at_console, "[XGLua] weapons.GetStored error: %s\n", XGLua_ErrorText( L, -1 ) );
 		lua_pop( L, 1 );
-		return;
+		return 0;
 	}
 
 	// lua_next iteration order changes with each VM; IDs and ammo slots are
@@ -714,24 +872,42 @@ void XGLua_BuildWeaponCache( lua_State *L )
 				continue;
 			}
 
-			lua_getfield( L, -1, "Abstract" );
-			bool abstract = lua_toboolean( L, -1 ) != 0;
-			lua_pop( L, 1 );
-			if( abstract ) { lua_pop( L, 2 ); continue; }
+			// Validate fields into a local slot first: nothing becomes visible
+			// to the engine until every check below has passed, so an aborted
+			// build never leaves a half-filled cache entry behind.
+			XGLuaSWEPInfo local;
+			memset( &local, 0, sizeof( XGLuaSWEPInfo ) );
+			XGLuaSWEPInfo *swep = &local;
 			char soundPaths[XGLUA_SOUND_PER_WEAPON][XGLUA_SOUND_PATH_BYTES] = {};
 			int soundCount = 0;
-			if( !XGLua_ReadPrecacheSounds( L, -1, soundPaths, &soundCount ) ||
+			// Lua field reads are isolated per weapon: a raising __index (the
+			// Base inheritance resolver in weapons.lua) skips only this SWEP
+			// and registration continues with the remaining classes. The SWEP
+			// lua_cpcall uses a fresh C-function stack frame. Pin this SWEP table
+			// in the registry so nested protected readers can retrieve it safely.
+			lua_pushvalue( L, -1 );
+			const int tableRef = luaL_ref( L, LUA_REGISTRYINDEX );
+			XGLua_SWEPFieldCtx fc = { tableRef, classname, swep, soundPaths, &soundCount, false, false, false, false };
+			g_szSWEPFieldError[0] = 0;
+			if( !XGLua_ProtectedCall( L, XGLua_SWEPFieldCore, &fc, XGLua_SWEPFieldError, classname ) )
+			{
+				ALERT( at_console, "[XGLua] %s: field read failed, weapon skipped: %s\n", classname, g_szSWEPFieldError[0] ? g_szSWEPFieldError : "unknown error" );
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
+				lua_pop( L, 2 );
+				continue;
+			}
+			if( fc.abstract ) { luaL_unref( L, LUA_REGISTRYINDEX, tableRef ); lua_pop( L, 2 ); continue; }
+			if( !fc.soundsValid ||
 				!XGLua_ValidateSoundResources( soundPaths, soundCount, g_XGLuaSounds, g_nXGLuaSounds, XGLua_SoundExists ) )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid, missing, or excessive PrecacheSounds; weapon not registered\n", classname );
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 				lua_pop( L, 2 );
 				continue;
 			}
 					int id = 16;
 			while( id < WEAPON_SUIT && CBasePlayerItem::ItemInfoArray[id].iId ) ++id;
-			if( id >= WEAPON_SUIT ) { ALERT( at_console, "[XGLua] no free weapon ID for %s\n", classname ); lua_pop( L, 2 ); continue; }
-			XGLuaSWEPInfo *swep = &g_SWEPs[g_nSWEPs++];
-			memset( swep, 0, sizeof( XGLuaSWEPInfo ) );
+			if( id >= WEAPON_SUIT ) { ALERT( at_console, "[XGLua] no free weapon ID for %s\n", classname ); luaL_unref( L, LUA_REGISTRYINDEX, tableRef ); lua_pop( L, 2 ); continue; }
 			swep->id = id;
 			swep->deploysequence = 7;
 			strcpy( swep->animextension, "onehanded" );
@@ -739,111 +915,8 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			// v1: the client HUD only knows vanilla weapon names — report the
 			// 9mm pistol alias (design doc 9.5 P1; P2 removes this alias)
 			strcpy( swep->hudname, "weapon_9mmhandgun" );
-
-			lua_getfield( L, -1, "ViewModel" );
-			if( lua_isstring( L, -1 ) )
-				strncpy( swep->viewmodel, lua_tostring( L, -1 ), sizeof( swep->viewmodel ) - 1 );
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "WorldModel" );
-			if( lua_isstring( L, -1 ) )
-				strncpy( swep->worldmodel, lua_tostring( L, -1 ), sizeof( swep->worldmodel ) - 1 );
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "PlayerModel" );
-			if( lua_isstring( L, -1 ) )
-				strncpy( swep->playermodel, lua_tostring( L, -1 ), sizeof( swep->playermodel ) - 1 );
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "DeploySequence" );
-			if( lua_isnumber( L, -1 ) )
-			{
-				double sequence = lua_tonumber( L, -1 );
-				if( std::isfinite( sequence ) && sequence >= 0 && sequence <= 255 && floor( sequence ) == sequence )
-					swep->deploysequence = (int)sequence;
-				else
-					ALERT( at_console, "[XGLua] %s: invalid DeploySequence, using 7\n", classname );
-			}
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "AnimExtension" );
-			if( lua_isstring( L, -1 ) )
-			{
-				const char *extension = lua_tostring( L, -1 );
-				if( *extension && strlen( extension ) < sizeof( swep->animextension ) )
-					strcpy( swep->animextension, extension );
-				else
-					ALERT( at_console, "[XGLua] %s: invalid AnimExtension, using onehanded\n", classname );
-			}
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "Slot" );
-			swep->slot = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 2;
-			swep->slot = Q_max( 0, Q_min( swep->slot, MAX_WEAPON_SLOTS - 1 ) );
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "SlotPos" );
-			swep->slotpos = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : 1;
-			swep->slotpos = Q_max( 0, Q_min( swep->slotpos, MAX_WEAPON_SLOTS - 1 ) );
-			lua_pop( L, 1 );
-
-			bool explicitSecondaryMax = false;
-			bool validSecondary = true;
-			swep->maxammo2 = 68;
-			// SWEP.Primary sub-table
-			lua_getfield( L, -1, "Primary" );
-			if( lua_istable( L, -1 ) )
-			{
-				lua_getfield( L, -1, "Automatic" );
-				swep->primaryAutomatic = lua_toboolean( L, -1 ) != 0;
-				lua_pop( L, 1 );
-				lua_getfield( L, -1, "ClipSize" );
-				swep->clipsize = lua_isnumber( L, -1 ) ? (int)lua_tonumber( L, -1 ) : -1;
-				lua_pop( L, 1 );
-
-				lua_getfield( L, -1, "DefaultClip" );
-				swep->defaultclip = XGLua_InitialWeaponAmmo( lua_isnumber( L, -1 ), (int)lua_tonumber( L, -1 ), swep->clipsize );
-				lua_pop( L, 1 );
-
-				lua_getfield( L, -1, "Ammo" );
-				if( lua_isstring( L, -1 ) )
-					strncpy( swep->ammo1, lua_tostring( L, -1 ), sizeof( swep->ammo1 ) - 1 );
-				lua_pop( L, 1 );
-			}
-			lua_pop( L, 1 );
-
-			lua_getfield( L, -1, "Secondary" );
-			if( lua_istable( L, -1 ) )
-			{
-				lua_getfield( L, -1, "Automatic" );
-				swep->secondaryAutomatic = lua_toboolean( L, -1 ) != 0;
-				lua_pop( L, 1 );
-				lua_getfield( L, -1, "Ammo" );
-				if( lua_isstring( L, -1 ) ) strncpy( swep->ammo2, lua_tostring( L, -1 ), sizeof( swep->ammo2 ) - 1 );
-				lua_pop( L, 1 );
-				lua_getfield( L, -1, "ClipSize" );
-				if( !lua_isnil( L, -1 ) && ( !lua_isnumber( L, -1 ) || lua_tonumber( L, -1 ) != -1 ) ) validSecondary = false;
-				lua_pop( L, 1 );
-				lua_getfield( L, -1, "DefaultAmmo" );
-				if( !lua_isnil( L, -1 ) )
-				{
-					double amount = lua_tonumber( L, -1 );
-					if( !lua_isnumber( L, -1 ) || !std::isfinite( amount ) || amount < 0 || amount > 254 || floor( amount ) != amount ) validSecondary = false;
-					else swep->defaultammo2 = (int)amount;
-				}
-				lua_pop( L, 1 );
-				lua_getfield( L, -1, "MaxAmmo" );
-				if( !lua_isnil( L, -1 ) )
-				{
-					explicitSecondaryMax = true;
-					double amount = lua_tonumber( L, -1 );
-					if( !lua_isnumber( L, -1 ) || !std::isfinite( amount ) || amount < 1 || amount > 254 || floor( amount ) != amount ) validSecondary = false;
-					else swep->maxammo2 = (int)amount;
-				}
-				lua_pop( L, 1 );
-			}
-			lua_pop( L, 1 );
-
+			bool explicitSecondaryMax = fc.explicitSecondaryMax;
+			bool validSecondary = fc.validSecondary;
 			if( !swep->ammo1[0] )
 				strcpy( swep->ammo1, "none" );
 			// Infinite-ammo weapons have no reserve to refill a finite clip.
@@ -851,7 +924,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( !XGLua_ValidAmmoClipConfig( swep->ammo1, swep->clipsize ) )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid ClipSize/Ammo; use -1 for clipless, positive clip with reserve ammo\n", classname );
-				--g_nSWEPs;
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 				lua_pop( L, 2 );
 				continue;
 			}
@@ -885,7 +958,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( !validSecondary )
 			{
 				ALERT( at_console, "[XGLua] %s: invalid secondary ammo configuration or conflicting ammo limit\n", classname );
-				--g_nSWEPs;
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 				lua_pop( L, 2 );
 				continue;
 			}
@@ -903,7 +976,7 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( giAmmoIndex + newAmmoNames >= MAX_AMMO_SLOTS )
 			{
 				ALERT( at_console, "[XGLua] no free ammo slots for %s\n", classname );
-				--g_nSWEPs;
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 				lua_pop( L, 2 );
 				continue;
 			}
@@ -925,10 +998,31 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( !foundPosition )
 			{
 				ALERT( at_console, "[XGLua] no free HUD slot for %s\n", classname );
-				--g_nSWEPs;
+				luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 				lua_pop( L, 2 );
 				continue;
 			}
+
+			// Registry store comes first: it is the only raise-capable step left
+			// (newtable/rawset allocate), so a failure here still leaves nothing
+			// committed for this weapon. The engine writes below cannot raise.
+			{
+				XGLua_StoreSWEPTableCtx sc = { tableRef, swep->classname };
+				g_szSWEPFieldError[0] = 0;
+				if( !XGLua_ProtectedCall( L, XGLua_StoreSWEPTableCore, &sc, XGLua_SWEPFieldError, classname ) )
+				{
+					ALERT( at_console, "[XGLua] %s: registry store failed, weapon skipped: %s\n", classname, g_szSWEPFieldError[0] ? g_szSWEPFieldError : "unknown error" );
+					luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
+					lua_pop( L, 2 );
+					continue;
+				}
+			}
+
+			// All checks passed - commit the cache entry, then touch the
+			// engine. Nothing below can raise a Lua error.
+			swep = &g_SWEPs[g_nSWEPs];
+			*swep = local;
+			g_nSWEPs++;
 
 			// fill the ItemInfoArray slot — mirrors UTIL_PrecacheOtherWeapon
 			ItemInfo &II = swep->info;
@@ -974,16 +1068,30 @@ void XGLua_BuildWeaponCache( lua_State *L )
 			if( swep->playermodel[0] )
 				PRECACHE_MODEL( (char *)swep->playermodel );
 
-			// Keep the actual table, not the lua_next classname key.
-			XGLua_StoreSWEPTable( L, -1, swep->classname );
 
 			ALERT( at_console, "[XGLua] registered SWEP: %s\n", swep->classname );
+			// Release after the engine cache is fully committed so even an
+			// allocation failure here cannot leave a registry-only weapon.
+			luaL_unref( L, LUA_REGISTRYINDEX, tableRef );
 		}
 		lua_pop( L, 2 );
 	}
 	lua_pop( L, 1 );	// sorted names
 	lua_pop( L, 1 );	// GetStored table
 	lua_pop( L, 1 );	// weapons table
+	return 0;
+}
+
+void XGLua_BuildWeaponCache( lua_State *L )
+{
+	g_nSWEPs = 0;
+	g_nXGLuaSounds = 0;
+	// The whole build runs inside one protected frame as a safety net;
+	// per-weapon field reads are isolated in their own protected calls, so a
+	// broken SWEP is skipped with a report while the remaining classes keep
+	// registering. Entries committed so far always stay consistent.
+	// is restored either way.
+	XGLua_ProtectedCall( L, XGLua_BuildWeaponCacheCore, NULL, XGLua_ReportError, "weapon cache build" );
 }
 
 // Snapshot names, not just numeric IDs: the script set may change between

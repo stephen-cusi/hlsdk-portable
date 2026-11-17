@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "xglua.h"
+#include "xglua_safe.h"
+#include "xglua_hook.h"
 #include "xglua_vm_timer.h"
 #include "player.h"
 extern "C" {
@@ -35,40 +37,22 @@ void XGLua_GetSWEPRegistry( lua_State *L );
 // helpers
 //===========================================================================
 
-static void LuaError( lua_State *L, const char *context )
+// Shared engine-side error reporter for protected calls: receives the error
+// object on top and pops it. Declared in xglua.h so other glue files
+// dispatch through the same protected-call boundary (xglua_safe.h).
+void XGLua_ReportError( lua_State *L, const char *context )
 {
-	const char *message = lua_tostring( L, -1 );
-	ALERT( at_console, "[XGLua] %s error:\n%s\n", context, message ? message : lua_typename( L, lua_type( L, -1 ) ) );
+	// The reporter runs after the protected call has returned, so no string
+	// conversion is allowed here: only genuine strings are printed, any
+	// other error value degrades to its type name (XGLua_ErrorText).
+	ALERT( at_console, "[XGLua] %s error:\n%s\n", context, XGLua_ErrorText( L, -1 ) );
 	lua_pop( L, 1 );
 }
 
 void XGLua_HookRun( lua_State *L, const char *event )
 {
-	if( !L )
-		return;
-
-	// hook.Run( event )
-	lua_getglobal( L, "hook" );
-	if( !lua_istable( L, -1 ) )
-	{
-		lua_pop( L, 1 );
-		return;
-	}
-	lua_getfield( L, -1, "Run" );
-	if( !lua_isfunction( L, -1 ) )
-	{
-		lua_pop( L, 2 );
-		return;
-	}
-	lua_pushstring( L, event );
-	lua_remove( L, -3 );	// drop hook table
-
-	if( lua_pcall( L, 1, 0, 0 ) != 0 )
-	{
-		char szCtx[128];
-		snprintf( szCtx, sizeof( szCtx ), "hook.Run(\"%s\")", event );
-		LuaError( L, szCtx );
-	}
+	// hook.Run( event ) - lookup and call inside one protected frame
+	XGLua_HookRunProtected( L, event, NULL, NULL, XGLua_ReportError );
 }
 
 // Internal loads discard script results but retain/report failures. Includes
@@ -85,7 +69,7 @@ static bool XGLua_LoadScriptChecked( lua_State *L, const char *relpath )
     int status = XGLua_ExecuteScript( L, relative, XGLua_ReadDiskScript, g_szGameDir, 0 );
     if( status != XGLUA_READ_OK )
     {
-        LuaError( L, "script load" );
+        XGLua_ReportError( L, "script load" );
         lua_settop( L, top );
         return false;
     }
@@ -227,18 +211,28 @@ static void XGLua_LuaRun_f( void )
 	}
 
 	lua_State *L = g_xglua_L;
+	// luaL_loadbuffer is protected internally (lj_load.c lua_loadx uses
+	// lj_vm_cpcall): syntax and OOM errors come back as a status code.
 	if( luaL_loadbuffer( L, code.c_str(), code.size(), "lua_run" ) != 0 )
 	{
-		LuaError( L, "lua_run load" );
+		XGLua_ReportError( L, "lua_run load" );
 		return;
 	}
 	if( lua_pcall( L, 0, 1, 0 ) != 0 )
 	{
-		LuaError( L, "lua_run" );
+		XGLua_ReportError( L, "lua_run" );
 		return;
 	}
-	if( lua_isstring( L, -1 ) )
+	// lua_isstring also matches numbers, and converting one allocates;
+	// only genuine strings go through lua_tostring, numbers echo via %g.
+	if( lua_type( L, -1 ) == LUA_TSTRING )
 		ALERT( at_console, "[Lua] %s\n", lua_tostring( L, -1 ) );
+	else if( lua_type( L, -1 ) == LUA_TNUMBER )
+	{
+		char szNum[32];
+		snprintf( szNum, sizeof( szNum ), "%g", lua_tonumber( L, -1 ) );
+		ALERT( at_console, "[Lua] %s\n", szNum );
+	}
 	lua_pop( L, 1 );
 }
 
@@ -249,8 +243,11 @@ static void XGLua_LuaRun_f( void )
 void XGLua_GetSWEPRegistry( lua_State *L )
 {
 	// registry[XGLUA_SWEP_REGISTRY] = { [classname] = SWEP table }
+	// Raw access on purpose: the registry is engine-internal state and this
+	// helper also runs on the engine Restore path, where a script-planted
+	// registry metatable must not turn a lookup into an unprotected raise.
 	lua_pushlightuserdata( L, (void *)XGLUA_SWEP_REGISTRY );
-	lua_gettable( L, LUA_REGISTRYINDEX );
+	lua_rawget( L, LUA_REGISTRYINDEX );
 	if( lua_isnil( L, -1 ) )
 	{
 		lua_pop( L, 1 );
@@ -258,22 +255,34 @@ void XGLua_GetSWEPRegistry( lua_State *L )
 		lua_pushvalue( L, -1 );						// copy
 		lua_pushlightuserdata( L, (void *)XGLUA_SWEP_REGISTRY );
 		lua_insert( L, -2 );						// key under value
-		lua_settable( L, LUA_REGISTRYINDEX );		// registry[key] = table
+		lua_rawset( L, LUA_REGISTRYINDEX );		// registry[key] = table
 	}
+}
+
+struct XGLua_IsLuaWeaponCtx { const char *classname; BOOL found; };
+
+static int XGLua_IsLuaWeaponCore( lua_State *L, void *ud )
+{
+	XGLua_IsLuaWeaponCtx *ctx = (XGLua_IsLuaWeaponCtx *)ud;
+	XGLua_GetSWEPRegistry( L );
+	lua_pushstring( L, ctx->classname );
+	lua_rawget( L, -2 );
+	ctx->found = lua_istable( L, -1 ) ? TRUE : FALSE;
+	return 0;
 }
 
 BOOL XGLua_IsLuaWeapon( const char *classname )
 {
 	lua_State *L = g_xglua_L;
-	if( !L )
+	if( !L || !classname )
 		return FALSE;
 
-	XGLua_GetSWEPRegistry( L );
-	lua_pushstring( L, classname );
-	lua_rawget( L, -2 );
-	BOOL bFound = lua_istable( L, -1 );
-	lua_pop( L, 2 );
-	return bFound;
+	// This lookup also runs from native Give/restore engine callbacks. The
+	// registry access is raw, but pushing an unregistered classname can still
+	// allocate, so keep the entire operation inside the protected boundary.
+	XGLua_IsLuaWeaponCtx ctx = { classname, FALSE };
+	XGLua_ProtectedCall( L, XGLua_IsLuaWeaponCore, &ctx, XGLua_ReportError, "weapon registry lookup" );
+	return ctx.found;
 }
 
 //===========================================================================
@@ -366,6 +375,10 @@ void XGLua_Startup( void )
 
 	luaL_openlibs( L );
 
+	// Everything up to and including the base globals runs before any user
+	// script, so no user metamethods can exist on _G or package yet and these
+	// writes cannot raise. Script-loaded state below is only touched inside
+	// protected calls (see xglua_safe.h).
 	// package.path — lua/ tree
 	char szPath[1024];
 	snprintf( szPath, sizeof( szPath ),
@@ -403,7 +416,7 @@ void XGLua_Startup( void )
 	XGLua_RegisterWeaponLibs( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
-	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadDiskScript, g_szGameDir, LuaError ) )
+	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadDiskScript, g_szGameDir, XGLua_ReportError ) )
 	{
 		ALERT( at_console, "[XGLua] core init failed, VM not started\n" );
 		return;
@@ -450,22 +463,20 @@ void XGLua_StartFrame( void )
 		return;
 
 	XGLua_EntityFrame( L );  // bounded cleanup of native-removed handles
-	XGLua_RunTimerTick( L, LuaError );
+	XGLua_RunTimerTick( L, XGLua_ReportError );
 
 	XGLua_HookRun( L, "Think" );
 }
 
+static int XGLua_PushSpawnedPlayer( lua_State *L, void *ctx )
+{
+	XGLua_PushEntity( L, ( (CBasePlayer *)ctx )->edict() );
+	return 1;
+}
+
 void XGLua_PlayerSpawn( CBasePlayer *pPlayer )
 {
-	lua_State *L = g_xglua_L;
-	if( !L || !pPlayer )
-		return;
-
-	lua_getglobal( L, "hook" );
-	lua_getfield( L, -1, "Run" );
-	lua_remove( L, -2 );
-	lua_pushstring( L, "PlayerSpawn" );
-	XGLua_PushEntity( L, pPlayer->edict() );
-	if( lua_pcall( L, 2, 0, 0 ) != 0 )
-		LuaError( L, "hook.Run(PlayerSpawn)" );
+	// hook.Run( "PlayerSpawn", ply ) via the shared protected dispatch;
+	// the entity handle is pushed inside the protected frame
+	XGLua_HookRunProtected( g_xglua_L, "PlayerSpawn", XGLua_PushSpawnedPlayer, pPlayer, XGLua_ReportError );
 }

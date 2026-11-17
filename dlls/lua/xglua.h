@@ -37,6 +37,9 @@ void XGLua_PlayerSpawn( CBasePlayer *pPlayer );     // CBasePlayer::Spawn: hook 
 //
 void XGLua_LoadScript( lua_State *L, const char *relpath );   // relative to <gamedir>/lua/
 void XGLua_HookRun( lua_State *L, const char *event );        // hook.Run(event, ...)
+// Error reporter for protected calls: logs "[XGLua] <context> error:"
+// plus the message and pops the error object on top of the stack.
+void XGLua_ReportError( lua_State *L, const char *context );
 
 //
 // Entities

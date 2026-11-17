@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "xglua.h"
+#include "xglua_safe.h"
 #include "weapons.h"
 #include "player.h"
 #include "enginecallback.h"
@@ -42,12 +43,23 @@ static edict_t *XGLua_ValidateEnt( XGLuaEntRef *ref )
 #include "xglua_entity_handles.h"
 #include "xglua_entity_spatial.h"
 
+struct XGLua_EntityFrameCtx { int maxSlots; int *sweepIndex; };
+
+static int XGLua_EntityFrameCore( lua_State *L, void *ctx )
+{
+	XGLua_EntityFrameCtx *frame = (XGLua_EntityFrameCtx *)ctx;
+	XGLua_SweepEntityHandles( L, frame->maxSlots, 8, frame->sweepIndex );
+	return 0;
+}
+
 void XGLua_EntityFrame( lua_State *L )
 {
 	// The cursor contains only a slot number; it is normalized on every call,
 	// so retaining it between VMs cannot retain Lua state or entity pointers.
 	static int sweepIndex = 0;
-	if( L && gpGlobals ) XGLua_SweepEntityHandles( L, gpGlobals->maxEntities, 8, &sweepIndex );
+	if( !L || !gpGlobals ) return;
+	XGLua_EntityFrameCtx frame = { gpGlobals->maxEntities, &sweepIndex };
+	XGLua_ProtectedCall( L, XGLua_EntityFrameCore, &frame, XGLua_ReportError, "entity handle sweep" );
 }
 
 edict_t *XGLua_CheckEntity( lua_State *L, int idx )
