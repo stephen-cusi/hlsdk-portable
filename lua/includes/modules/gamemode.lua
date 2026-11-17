@@ -57,3 +57,45 @@ function gamemode.GetAll()
 	end
 	return out
 end
+
+--[[---------------------------------------------------------------------------
+	Name: DeriveGamemode( name )
+	Desc: Global, GMod-style. Declares that the gamemode being loaded (the
+		current GM table) derives from the registered gamemode <name> by
+		setting GM.BaseClass. The base must already be registered - the C++
+		loader resolves the txt "base" chain and runs it first, so a base
+		named in metadata is always available by the time derived scripts
+		run. This function never reads files or re-runs base scripts.
+
+		Calling it outside gamemode script loading (GM not a table yet) or
+		with an unregistered name raises a Lua error naming the mode.
+		Repeated calls with the same base are safe and idempotent.
+-----------------------------------------------------------------------------]]
+function DeriveGamemode( name )
+	local nameType = type( name )
+	if ( nameType ~= "string" ) then
+		local shown = nameType
+		if ( nameType == "number" or nameType == "boolean" ) then
+			shown = tostring( name )
+		elseif ( nameType ~= "nil" ) then
+			shown = "<" .. nameType .. ">"
+		end
+		error( string.format( "DeriveGamemode(%s): bad argument #1 (string expected, got %s)",
+			shown, nameType ), 2 )
+	end
+
+	if ( type( GM ) ~= "table" ) then
+		error( string.format( "DeriveGamemode('%s'): GM is not a table (called outside gamemode loading; GM is %s)",
+			name, type( GM ) ), 2 )
+	end
+
+	local base = gamemode.Get( name )
+	if ( base == nil ) then
+		error( string.format( "DeriveGamemode('%s'): base gamemode is not registered", name ), 2 )
+	end
+
+	-- rawequal skips any __eq metamethod and makes the same-table repeat
+	-- call an explicit no-op; a different registered base overrides.
+	if ( rawequal( GM.BaseClass, base ) ) then return end
+	GM.BaseClass = base
+end
