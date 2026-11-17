@@ -954,6 +954,11 @@ void CBasePlayer::Killed( entvars_t *pevAttacker, int iGib )
 	if( g_pGameRules->IsMultiplayer())
 		pev->solid = SOLID_NOT;
 
+	// XGLua: notification-only PlayerDeath hook. Single call site before
+	// the gib-return / fallthrough split, so every death fires exactly once;
+	// protected dispatch, errors cannot interrupt the death flow.
+	XGLua_PlayerDeath( this, g_pevLastInflictor, pevAttacker );
+
 	if( ( pev->health < -40 && iGib != GIB_NEVER ) || iGib == GIB_ALWAYS )
 	{
 		pev->solid = SOLID_NOT;

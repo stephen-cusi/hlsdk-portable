@@ -32,6 +32,7 @@ void XGLua_Shutdown( void );                        // ServerDeactivate: close V
 void XGLua_StartFrame( void );                      // StartFrame: timer.Tick + hook Think
 void XGLua_PlayerSpawn( CBasePlayer *pPlayer );     // CBasePlayer::Spawn: hook PlayerSpawn
 BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer );   // gamerules PlayerSpawn: hook PlayerLoadout
+void XGLua_PlayerDeath( CBasePlayer *victim, entvars_t *inflictor, entvars_t *attacker ); // CBasePlayer::Killed: hook PlayerDeath
 
 //
 // Script loading / dispatch

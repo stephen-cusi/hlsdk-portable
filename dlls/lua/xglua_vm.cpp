@@ -520,3 +520,37 @@ BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer )
 	return XGLua_HookRunBool( g_xglua_L, "PlayerLoadout", XGLua_PushSpawnedPlayer, pPlayer,
 		XGLua_ReportError ) ? TRUE : FALSE;
 }
+
+// hook.Run( "PlayerDeath", victim, inflictor, attacker ): notification-only
+// dispatch from CBasePlayer::Killed (placed before the gib/normal split so
+// every death fires exactly once). The inflictor comes from
+// g_pevLastInflictor and the attacker from the Killed parameter; invalid or
+// empty entities map to nil instead of pushing a handle for a dead edict.
+// Callback errors are reported and contained - the death flow itself is
+// never interrupted.
+struct XGLua_DeathArgs { CBasePlayer *victim; entvars_t *inflictor; entvars_t *attacker; };
+
+static void XGLua_PushEntOrNull( lua_State *L, entvars_t *pev )
+{
+	if( !FNullEnt( pev ) )
+		XGLua_PushEntity( L, ENT( pev ) );
+	else
+		lua_pushnil( L );
+}
+
+static int XGLua_PushDeathArgs( lua_State *L, void *ctx )
+{
+	XGLua_DeathArgs *a = (XGLua_DeathArgs *)ctx;
+	XGLua_PushEntity( L, a->victim->edict() );	// victim: the dying player
+	XGLua_PushEntOrNull( L, a->inflictor );
+	XGLua_PushEntOrNull( L, a->attacker );
+	return 3;
+}
+
+void XGLua_PlayerDeath( CBasePlayer *victim, entvars_t *inflictor, entvars_t *attacker )
+{
+	if( !g_xglua_L || !victim )
+		return;
+	XGLua_DeathArgs args = { victim, inflictor, attacker };
+	XGLua_HookRunProtected( g_xglua_L, "PlayerDeath", XGLua_PushDeathArgs, &args, XGLua_ReportError );
+}
