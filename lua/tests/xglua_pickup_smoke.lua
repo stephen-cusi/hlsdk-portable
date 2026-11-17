@@ -39,9 +39,13 @@ end
 
 local deniedWeapons = denyLookup( Smoke.DeniedWeapons )
 local deniedItems = denyLookup( Smoke.DeniedItems )
+local loggedWeapons = {}
+local loggedItems = {}
 
 function Smoke.Enable()
 	Smoke.Active = true
+	loggedWeapons = {}
+	loggedItems = {}
 	print( "[XGLua] pickup smoke: enabled (weapons: " .. table.concat( Smoke.DeniedWeapons, ", " )
 		.. " | items: " .. table.concat( Smoke.DeniedItems, ", " ) .. ")" )
 end
@@ -56,7 +60,11 @@ hook.Add( "PlayerCanPickupWeapon", "xglua_pickup_smoke", function( ply, wep )
 	if not IsValid( wep ) then return nil end
 	local class = wep:GetClass()
 	if deniedWeapons[ class ] then
-		print( "[XGLua] pickup smoke: denying weapon '" .. class .. "'" )
+		local index = tostring( wep:EntIndex() )
+		if not loggedWeapons[ index ] then
+			loggedWeapons[ index ] = true
+			print( "[XGLua] pickup smoke: denying weapon '" .. class .. "'" )
+		end
 		return false
 	end
 	return nil
@@ -67,7 +75,11 @@ hook.Add( "PlayerCanPickupItem", "xglua_pickup_smoke", function( ply, item )
 	if not IsValid( item ) then return nil end
 	local class = item:GetClass()
 	if deniedItems[ class ] then
-		print( "[XGLua] pickup smoke: denying item '" .. class .. "'" )
+		local index = tostring( item:EntIndex() )
+		if not loggedItems[ index ] then
+			loggedItems[ index ] = true
+			print( "[XGLua] pickup smoke: denying item '" .. class .. "'" )
+		end
 		return false
 	end
 	return nil
