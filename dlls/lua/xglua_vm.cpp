@@ -506,3 +506,17 @@ void XGLua_PlayerSpawn( CBasePlayer *pPlayer )
 	// the entity handle is pushed inside the protected frame
 	XGLua_HookRunProtected( g_xglua_L, "PlayerSpawn", XGLua_PushSpawnedPlayer, pPlayer, XGLua_ReportError );
 }
+
+BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer )
+{
+	// hook.Run( "PlayerLoadout", ply ): strict-boolean control over the vanilla
+	// default spawn loadout. Only a genuine Lua true from the hook chain (a
+	// plain hook return or the GM:PlayerLoadout fallback) skips the hardcoded
+	// crowbar/9mm/ammo in CHalfLifeMultiplay::PlayerSpawn; no VM, no hook, no
+	// method, any other return type, or a reported Lua error keeps the vanilla
+	// behavior. Never interrupts the spawn itself.
+	if( !g_xglua_L || !pPlayer )
+		return FALSE;
+	return XGLua_HookRunBool( g_xglua_L, "PlayerLoadout", XGLua_PushSpawnedPlayer, pPlayer,
+		XGLua_ReportError ) ? TRUE : FALSE;
+}

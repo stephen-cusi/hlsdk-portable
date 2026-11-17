@@ -31,6 +31,7 @@ void XGLua_PostEntityInit( void );                  // ServerActivate: entity ho
 void XGLua_Shutdown( void );                        // ServerDeactivate: close VM
 void XGLua_StartFrame( void );                      // StartFrame: timer.Tick + hook Think
 void XGLua_PlayerSpawn( CBasePlayer *pPlayer );     // CBasePlayer::Spawn: hook PlayerSpawn
+BOOL XGLua_PlayerLoadout( CBasePlayer *pPlayer );   // gamerules PlayerSpawn: hook PlayerLoadout
 
 //
 // Script loading / dispatch

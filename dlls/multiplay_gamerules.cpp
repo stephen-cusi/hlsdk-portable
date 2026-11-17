@@ -27,6 +27,7 @@
 #include	"game.h"
 #include	"items.h"
 #include	"voice_gamemgr.h"
+#include	"lua/xglua.h"	// XGLua: PlayerLoadout decision in PlayerSpawn
 #include	"hltv.h"
 #include	"trains.h"
 
@@ -527,9 +528,17 @@ void CHalfLifeMultiplay::PlayerSpawn( CBasePlayer *pPlayer )
 
 	if( addDefault )
 	{
-		pPlayer->GiveNamedItem( "weapon_crowbar" );
-		pPlayer->GiveNamedItem( "weapon_9mmhandgun" );
-		pPlayer->GiveAmmo( 68, "9mm", _9MM_MAX_CARRY );// 4 full reloads
+		// XGLua: GM:PlayerLoadout(ply) may replace exactly this hardcoded
+		// default set. Only a strict Lua true skips it; everything else
+		//(including Lua errors, reported but contained) falls through. The
+		// game_player_equip branch above keeps its original priority and
+		// never consults Lua.
+		if( !XGLua_PlayerLoadout( pPlayer ) )
+		{
+			pPlayer->GiveNamedItem( "weapon_crowbar" );
+			pPlayer->GiveNamedItem( "weapon_9mmhandgun" );
+			pPlayer->GiveAmmo( 68, "9mm", _9MM_MAX_CARRY );// 4 full reloads
+		}
 	}
 
 	pPlayer->m_iAutoWepSwitch = iOldAutoWepSwitch;
