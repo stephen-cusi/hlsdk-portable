@@ -465,6 +465,7 @@ void XGLua_StartFrame( void )
 	if( !L )
 		return;
 
+	XGLua_EntityFrame( L );  // bounded cleanup of native-removed handles
 	XGLua_RunTimerTick( L, LuaError );
 
 	XGLua_HookRun( L, "Think" );

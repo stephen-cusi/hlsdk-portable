@@ -39,6 +39,16 @@ static edict_t *XGLua_ValidateEnt( XGLuaEntRef *ref )
 	return ref->pent;
 }
 
+#include "xglua_entity_handles.h"
+
+void XGLua_EntityFrame( lua_State *L )
+{
+	// The cursor contains only a slot number; it is normalized on every call,
+	// so retaining it between VMs cannot retain Lua state or entity pointers.
+	static int sweepIndex = 0;
+	if( L && gpGlobals ) XGLua_SweepEntityHandles( L, gpGlobals->maxEntities, 8, &sweepIndex );
+}
+
 void XGLua_PushEntity( lua_State *L, edict_t *pent )
 {
 	if( FNullEnt( pent ) )
@@ -46,11 +56,13 @@ void XGLua_PushEntity( lua_State *L, edict_t *pent )
 		lua_pushnil( L );
 		return;
 	}
-	XGLuaEntRef *ref = (XGLuaEntRef *)lua_newuserdata( L, sizeof( XGLuaEntRef ) );
-	ref->pent = pent;
-	ref->serial = pent->serialnumber;
-	luaL_getmetatable( L, XGLUA_ENTITY_META );
-	lua_setmetatable( L, -2 );
+	// Cache by edict index and serial. Incremental sweeping bounds work per
+	// push while pruning native removals even if Lua never called Remove().
+	static int sweepIndex = 0;
+	int maxEntities = gpGlobals->maxEntities;
+	if( maxEntities <= 0 ) maxEntities = 1;
+	if( sweepIndex >= maxEntities ) sweepIndex = 0;
+	XGLua_PushEntityHandle( L, pent, ENTINDEX( pent ), sweepIndex++ );
 }
 
 edict_t *XGLua_CheckEntity( lua_State *L, int idx )
@@ -84,13 +96,8 @@ static CBaseEntity *Ent( lua_State *L, int idx )
 
 static int XGLua_IsValidEntity( lua_State *L, int idx )
 {
-	// IsValid: accepts nil, entity handles (validates serial), NULL entity
-	if( lua_isnil( L, idx ) )
-		return 0;
-	if( !lua_isuserdata( L, idx ) )
-		return lua_toboolean( L, idx );
-	XGLuaEntRef *ref = (XGLuaEntRef *)luaL_checkudata( L, idx, XGLUA_ENTITY_META );
-	return XGLua_ValidateEnt( ref ) != NULL;
+	XGLuaEntRef *ref = XGLua_TestEntityRef( L, idx );
+	return ref && XGLua_ValidateEnt( ref ) != NULL;
 }
 
 //===========================================================================
@@ -325,28 +332,12 @@ static int Ent_GetName( lua_State *L )
 	return 1;
 }
 
-static int Ent_Index( lua_State *L )
+static const char *XGLua_EntityClassName( edict_t *pent )
 {
-	edict_t *pent = XGLua_CheckEntity( L, 1 );
-	const char *cls = STRING( VARS( pent )->classname );
-	if( XGLua_IsLuaWeapon( cls ) )
-	{
-		XGLua_GetSWEPRegistry( L );
-		lua_getfield( L, -1, cls );
-		if( lua_istable( L, -1 ) )
-		{
-			lua_pushvalue( L, 2 );
-			lua_gettable( L, -2 );
-			if( !lua_isnil( L, -1 ) ) return 1;
-			lua_pop( L, 1 );
-		}
-		lua_pop( L, 2 );
-	}
-	luaL_getmetatable( L, XGLUA_ENTITY_META );
-	lua_pushvalue( L, 2 );
-	lua_rawget( L, -2 );
-	return 1;
+	return STRING( VARS( pent )->classname );
 }
+
+#include "xglua_entity_methods.h"
 
 //===========================================================================
 // Player methods
@@ -678,6 +669,7 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "ChatPrint", Ply_ChatPrint },
 		{ "Kill", Ply_Kill },
 		{ "__index", Ent_Index },
+		{ "__newindex", Ent_NewIndex },
 		{ NULL, NULL }
 	};
 	for( const luaL_Reg *f = entmeta; f->name; f++ )

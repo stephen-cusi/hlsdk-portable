@@ -41,6 +41,7 @@ void XGLua_HookRun( lua_State *L, const char *event );        // hook.Run(event,
 //
 // Entities
 //
+void XGLua_EntityFrame( lua_State *L );                        // bounded entity cache cleanup
 void XGLua_PushEntity( lua_State *L, edict_t *pent );         // entity handle userdata
 edict_t *XGLua_CheckEntity( lua_State *L, int idx );          // throws if not entity
 void XGLua_RegisterEntityLibs( lua_State *L );                // ents/player/util/Entity metatable
