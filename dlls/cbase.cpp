@@ -16,6 +16,7 @@
 #include	"extdll.h"
 #include	"util.h"
 #include	"cbase.h"
+#include "lua/xglua.h" // XGLua save factory alias
 #include	"saverestore.h"
 #include	"client.h"
 #include	"decals.h"
@@ -279,7 +280,7 @@ void DispatchSave( edict_t *pent, SAVERESTOREDATA *pSaveData )
 		}
 
 		pTable->location = pSaveData->size;		// Remember entity position for file I/O
-		pTable->classname = pEntity->pev->classname;	// Remember entity class for respawn
+		pTable->classname = XGLua_IsTrackedWeapon( pent ) ? ALLOC_STRING( "xglua_swep_restore" ) : pEntity->pev->classname; // XGLua: restore dynamic class via exported factory
 
 		CSave saveHelper( pSaveData );
 		pEntity->Save( saveHelper );

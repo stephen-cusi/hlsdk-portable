@@ -56,6 +56,11 @@ void XGLua_GetSWEPRegistry( lua_State *L );              // registry table acces
 void XGLua_RegisterWeaponLibs( lua_State *L );                // weapon entity methods
 void XGLua_BuildWeaponCache( lua_State *L );                  // SWEP tables -> C++ cache
 CBasePlayerItem *XGLua_GiveLuaWeapon( CBasePlayer *pPlayer, const char *classname );
+bool XGLua_IsTrackedWeapon( const edict_t *pent );
+void XGLua_ClearWeaponTracking();
+void XGLua_PreparePlayerSave( CBasePlayer *player );
+void XGLua_MarkRestoredPlayer( CBasePlayer *player );
+void XGLua_ReconcileRestoredPlayers( edict_t *list, int count, int clients );
 BOOL XGLua_CanPickupSecondary( CBasePlayer *player, CBasePlayerItem *item );
 
 //

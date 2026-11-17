@@ -761,7 +761,8 @@ void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )
 	// Link user messages here to make sure first client can get them...
 	LinkUserMessages();
 
-	// XGLua: create the VM and load all scripts (after entities are ready)
+	// XGLua: all saved entities now exist; reconcile before Lua hooks or HUD.
+	XGLua_ReconcileRestoredPlayers( pEdictList, edictCount, clientMax );
 	XGLua_PostEntityInit();
 }
 

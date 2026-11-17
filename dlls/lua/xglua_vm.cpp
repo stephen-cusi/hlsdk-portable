@@ -432,6 +432,7 @@ void XGLua_PostEntityInit( void )
 
 void XGLua_Shutdown( void )
 {
+	XGLua_ClearWeaponTracking();
 	if( !g_xglua_L )
 		return;
 

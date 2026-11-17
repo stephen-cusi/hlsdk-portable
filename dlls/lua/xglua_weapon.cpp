@@ -13,10 +13,14 @@
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <vector>
 
 #include "xglua.h"
 #include "xglua_swep_bridge.h"
 #include "xglua_swep_order.h"
+#include "xglua_restore_map.h"
+#include "xglua_restore_inventory.h"
+#include "com_model.h"
 #include "weapons.h"
 #include "player.h"
 #include "xglua_ballistics.h"
@@ -87,6 +91,43 @@ static XGLuaSWEPInfo *XGLua_FindSWEP( const char *classname )
 	return NULL;
 }
 
+// Track concrete Lua weapon instances independently of their registered class:
+// during save restoration the VM can be absent and scripts can be removed.
+struct XGLuaTrackedWeapon { edict_t *edict; int serial; void *object; };
+static std::vector<XGLuaTrackedWeapon> g_TrackedWeapons;
+static std::vector<XGLuaRestoreMarker<CBasePlayer, edict_t> > g_RestoredPlayers;
+void XGLua_MarkRestoredPlayer( CBasePlayer *player )
+{
+    if( !player || !player->edict() ) return;
+    XGLuaRestoreMarker<CBasePlayer, edict_t> value = { player, player->edict(), player->edict()->serialnumber };
+    for( size_t i=0; i<g_RestoredPlayers.size(); ++i )
+        if( g_RestoredPlayers[i].edict==value.edict ) { g_RestoredPlayers[i]=value; return; }
+    g_RestoredPlayers.push_back( value );
+}
+static bool XGLua_IsRestoredPlayer( CBasePlayer *player )
+{
+    if( !player || !player->edict() || player->edict()->free ) return false;
+    for( size_t i=0; i<g_RestoredPlayers.size(); ++i )
+        if( XGLua_MarkerMatches( g_RestoredPlayers[i], player, player->edict(), player->edict()->serialnumber, true ) ) return true;
+    return false;
+}
+static void XGLua_TrackWeapon( edict_t *edict, void *object )
+{
+    XGLuaTrackedWeapon value = { edict, edict->serialnumber, object };
+    for( size_t i = 0; i < g_TrackedWeapons.size(); ++i )
+        if( g_TrackedWeapons[i].edict == edict ) { g_TrackedWeapons[i] = value; return; }
+    g_TrackedWeapons.push_back( value );
+}
+bool XGLua_IsTrackedWeapon( const edict_t *edict )
+{
+    if( !edict || edict->free ) return false;
+    for( size_t i = 0; i < g_TrackedWeapons.size(); ++i )
+        if( g_TrackedWeapons[i].edict == edict && g_TrackedWeapons[i].serial == edict->serialnumber &&
+            g_TrackedWeapons[i].object == edict->pvPrivateData ) return true;
+    return false;
+}
+void XGLua_ClearWeaponTracking() { g_TrackedWeapons.clear(); g_RestoredPlayers.clear(); g_nSWEPs = 0; g_nXGLuaSounds = 0; }
+
 //===========================================================================
 // CLuaWeapon
 //===========================================================================
@@ -96,6 +137,11 @@ class CLuaWeapon : public CBasePlayerWeapon
 public:
 	char m_szLuaClass[64];
 	int m_iDefaultSecondaryAmmo;
+	float m_xglSavedAttackTimes[3];
+	bool m_xglRestoreMissing;
+	static TYPEDESCRIPTION m_xglSaveData[];
+	int Save( CSave &save );
+	int Restore( CRestore &restore );
 
 	void Spawn( void );
 	void Precache( void );
@@ -115,6 +161,55 @@ public:
 
 	void InitFromCache( const char *classname );
 };
+
+// The engine creates restore table entities before the world or Lua VM.
+// This factory must never consult the Lua registry or call Spawn.
+extern "C" EXPORT void xglua_swep_restore( entvars_t *pev );
+void xglua_swep_restore( entvars_t *pev )
+{
+    CLuaWeapon *weapon = new( pev ) CLuaWeapon();
+    weapon->pev = pev;
+    weapon->m_szLuaClass[0] = 0;
+    weapon->m_xglRestoreMissing = true;
+    XGLua_TrackWeapon( ENT( pev ), weapon );
+}
+
+TYPEDESCRIPTION CLuaWeapon::m_xglSaveData[] = {
+    DEFINE_FIELD( CLuaWeapon, m_iDefaultSecondaryAmmo, FIELD_INTEGER ),
+    DEFINE_ARRAY( CLuaWeapon, m_xglSavedAttackTimes, FIELD_TIME, 3 ),
+};
+int CLuaWeapon::Save( CSave &save )
+{
+    m_xglSavedAttackTimes[0] = m_flNextPrimaryAttack;
+    m_xglSavedAttackTimes[1] = m_flNextSecondaryAttack;
+    m_xglSavedAttackTimes[2] = m_flTimeWeaponIdle;
+    if( !CBasePlayerWeapon::Save( save ) ) return 0;
+    return save.WriteFields( "XGLuaWeapon", this, m_xglSaveData, ARRAYSIZE( m_xglSaveData ) );
+}
+int CLuaWeapon::Restore( CRestore &restore )
+{
+    if( !CBasePlayerWeapon::Restore( restore ) ) return 0;
+    const bool saved = restore.ReadFields( "XGLuaWeapon", this, m_xglSaveData, ARRAYSIZE( m_xglSaveData ) ) != 0;
+    if( saved ) {
+        m_flNextPrimaryAttack = m_xglSavedAttackTimes[0];
+        m_flNextSecondaryAttack = m_xglSavedAttackTimes[1];
+        m_flTimeWeaponIdle = m_xglSavedAttackTimes[2];
+    }
+    const char *classname = STRING( pev->classname );
+    strncpy( m_szLuaClass, classname ? classname : "", sizeof( m_szLuaClass ) - 1 );
+    m_szLuaClass[sizeof( m_szLuaClass ) - 1] = 0;
+    XGLuaSWEPInfo *swep = g_xglua_L && XGLua_IsLuaWeapon( m_szLuaClass ) ? XGLua_FindSWEP( m_szLuaClass ) : NULL;
+    m_xglRestoreMissing = !swep;
+    m_iId = swep ? swep->id : 0;
+    // Restored ground and boxed weapons may later be picked up without going
+    // through player reconciliation. Their saved ammo indices are map-local.
+    m_iPrimaryAmmoType = swep && swep->info.pszAmmo1 ? CBasePlayer::GetAmmoIndex( swep->info.pszAmmo1 ) : -1;
+    m_iSecondaryAmmoType = swep && swep->info.pszAmmo2 ? CBasePlayer::GetAmmoIndex( swep->info.pszAmmo2 ) : -1;
+    m_fInReload = FALSE;
+    m_iClientClip = -1;
+    m_iClientWeaponState = -1;
+    return 1;
+}
 
 static void CallWeaponMethod( CLuaWeapon *w, const char *method )
 {
@@ -148,6 +243,7 @@ void CLuaWeapon::InitFromCache( const char *classname )
 	m_fInReload = 0;
 	m_fFireOnEmpty = FALSE;
 	m_iPlayEmptySound = 1;
+	m_xglRestoreMissing = false;
 }
 
 
@@ -313,6 +409,7 @@ CBasePlayerItem *XGLua_SpawnLuaWeapon( const char *classname, const Vector &orig
 	// is allocated by the engine right after the entvars block
 	CLuaWeapon *w = new( pev ) CLuaWeapon();
 	w->pev = pev;
+	XGLua_TrackWeapon( pent, w );
 	w->InitFromCache( classname );
 
 	return w;
@@ -887,4 +984,153 @@ void XGLua_BuildWeaponCache( lua_State *L )
 	lua_pop( L, 1 );	// sorted names
 	lua_pop( L, 1 );	// GetStored table
 	lua_pop( L, 1 );	// weapons table
+}
+
+// Snapshot names, not just numeric IDs: the script set may change between
+// save and restore and the engine stores inventory as numeric arrays.
+void XGLua_PreparePlayerSave( CBasePlayer *player )
+{
+    player->m_xglSaveVersion = 1;
+    for( int i=0; i<MAX_AMMO_SLOTS; ++i )
+    {
+        const char *name=CBasePlayerItem::AmmoInfoArray[i].pszName;
+        player->m_xglAmmoNames[i]=name && *name ? ALLOC_STRING(name) : 0;
+    }
+    for( int i=0; i<MAX_WEAPONS; ++i )
+    {
+        const ItemInfo &info=CBasePlayerItem::ItemInfoArray[i];
+        player->m_xglWeaponNames[i]=info.iId && info.pszName && *info.pszName ? ALLOC_STRING(info.pszName) : 0;
+    }
+}
+
+static void XGLua_ReconcileRestoredPlayer( CBasePlayer *player, edict_t *list, int count, int clientMax )
+{
+    if( !player || !player->m_xglRestorePending ) return;
+    player->m_xglRestorePending = false;
+    if( player->m_xglSaveVersion == 1 )
+    {
+        const char *oldAmmo[MAX_AMMO_SLOTS], *newAmmo[MAX_AMMO_SLOTS];
+        int scratch[MAX_AMMO_SLOTS];
+        for( int i=0; i<MAX_AMMO_SLOTS; ++i ) {
+            oldAmmo[i]=player->m_xglAmmoNames[i] ? STRING(player->m_xglAmmoNames[i]) : NULL;
+            newAmmo[i]=CBasePlayerItem::AmmoInfoArray[i].pszName;
+        }
+        XGLua_RemapSavedAmmo( player->m_rgAmmo, MAX_AMMO_SLOTS, oldAmmo, newAmmo, scratch );
+    }
+    else
+        ALERT( at_console, "[XGLua] old player save lacks ammo name map; preserving legacy numeric ammo slots\n" );
+
+    // Never follow the serialized player chain here: Xash may have culled an
+    // earlier item edict (EntityInSolid + SV_FreeOldEntities) during restore.
+    CBasePlayerItem *items[MAX_EDICTS] = {};
+    bool removedActive=false;
+    int itemCount=XGLua_CollectOwnedItems( list, count, clientMax+1, items, MAX_EDICTS,
+        []( edict_t *edict ) { return !edict->free && edict->pvPrivateData; },
+        []( edict_t *edict ) {
+            if( XGLua_IsTrackedWeapon( edict ) ) return true;
+            const char *classname=STRING( edict->v.classname );
+            if( !classname ) return false;
+            for( int id=1; id<MAX_WEAPONS; ++id )
+                if( CBasePlayerItem::ItemInfoArray[id].iId && CBasePlayerItem::ItemInfoArray[id].pszName && FStrEq( classname, CBasePlayerItem::ItemInfoArray[id].pszName ) ) return true;
+            return false;
+        },
+        []( edict_t *edict ) { return (CBasePlayerItem *)edict->pvPrivateData; },
+        [player]( edict_t *edict, CBasePlayerItem *item ) { return edict->v.owner==player->edict() && item->m_pPlayer==player; } );
+    CBasePlayerItem *active=player->m_pActiveItem, *last=player->m_pLastItem;
+    removedActive=active!=NULL;
+    itemCount=XGLua_FilterMissingRestoreItems( items, itemCount, active, last, removedActive,
+        []( CBasePlayerItem *item ) { return XGLua_IsTrackedWeapon( item->edict() ) && ((CLuaWeapon *)item)->m_xglRestoreMissing; },
+        [player]( CBasePlayerItem *item ) { item->m_pPlayer=NULL; UTIL_Remove( item ); } );
+    player->m_pActiveItem=active;
+    player->m_pLastItem=last;
+    for( int itemIndex=0; itemIndex<itemCount; ++itemIndex )
+    {
+        CBasePlayerItem *item=items[itemIndex];
+        CBasePlayerWeapon *weapon=(CBasePlayerWeapon *)item;
+        int primary=weapon->pszAmmo1() ? player->GetAmmoIndex(weapon->pszAmmo1()) : -1;
+        int secondary=weapon->pszAmmo2() ? player->GetAmmoIndex(weapon->pszAmmo2()) : -1;
+        weapon->m_iPrimaryAmmoType=primary;
+        weapon->m_iSecondaryAmmoType=secondary;
+        weapon->m_iClientClip=-1;
+        weapon->m_iClientWeaponState=-1;
+        items[itemIndex]=item;
+    }
+    XGLua_RebuildItemChains( items, itemCount, player->m_rgpPlayerItems, MAX_ITEM_TYPES,
+        active, last, []( CBasePlayerItem *item ) { int slot=item->iItemSlot(); return slot<0 || slot>=MAX_ITEM_TYPES ? -1 : slot; } );
+    player->m_pActiveItem=active;
+    player->m_pLastItem=last;
+    unsigned bits=player->pev->weapons & ( 1u << WEAPON_SUIT );
+    bits=XGLua_BuildWeaponBits( player->m_rgpPlayerItems, MAX_ITEM_TYPES, bits,
+        []( CBasePlayerItem *item ) { return item->m_iId; } );
+    player->pev->weapons=(int)bits;
+    if( removedActive && !active ) {
+        player->pev->viewmodel=0;
+        player->pev->weaponmodel=0;
+    }
+    player->m_fKnownItem=FALSE;
+    player->m_fWeapon=FALSE;
+    player->m_pClientActiveItem=NULL;
+    for( int i=0; i<MAX_AMMO_SLOTS; ++i ) player->m_rgAmmoLast[i]=-1;
+    player->TabulateAmmo();
+}
+void XGLua_ReconcileRestoredPlayers( edict_t *list, int count, int clients )
+{
+    if( !list || count<=1 ) return;
+    for( int i=1; i<=clients && i<count; ++i )
+        if( !list[i].free && list[i].pvPrivateData )
+        {
+            CBaseEntity *entity=CBaseEntity::Instance( &list[i] );
+        if( entity && entity->IsPlayer() && XGLua_IsRestoredPlayer( (CBasePlayer *)entity ) )
+            XGLua_ReconcileRestoredPlayer( (CBasePlayer *)entity, list, count, clients );
+        }
+
+    // Weapon boxes own linked lists of items as well. Unlink missing SWEPs
+    // before scheduling them for removal, leaving all native items intact.
+    for( int i=clients+1; i<count; ++i )
+    {
+        edict_t *edict=&list[i];
+        if( edict->free || !edict->pvPrivateData || !FClassnameIs( &edict->v, "weaponbox" ) ) continue;
+        CWeaponBox *box=(CWeaponBox *)CBaseEntity::Instance( edict );
+        CBasePlayerItem *boxItems[MAX_EDICTS] = {};
+        int itemCount=XGLua_CollectOwnedItems( list, count, clients+1, boxItems, MAX_EDICTS,
+            []( edict_t *candidate ) { return !candidate->free && candidate->pvPrivateData; },
+            []( edict_t *candidate ) {
+                if( XGLua_IsTrackedWeapon( candidate ) ) return true;
+                const char *classname=STRING( candidate->v.classname );
+                if( !classname ) return false;
+                for( int id=1; id<MAX_WEAPONS; ++id )
+                    if( CBasePlayerItem::ItemInfoArray[id].iId && CBasePlayerItem::ItemInfoArray[id].pszName && FStrEq( classname, CBasePlayerItem::ItemInfoArray[id].pszName ) ) return true;
+                return false;
+            },
+            []( edict_t *candidate ) { return (CBasePlayerItem *)candidate->pvPrivateData; },
+            [edict]( edict_t *candidate, CBasePlayerItem *item ) { return candidate->v.owner==edict && item->m_pPlayer==NULL; } );
+        int validCount=0;
+        for( int j=0; j<itemCount; ++j )
+        {
+            CBasePlayerItem *item=boxItems[j];
+            if( XGLua_IsTrackedWeapon( item->edict() ) && ((CLuaWeapon *)item)->m_xglRestoreMissing )
+            {
+                item->m_pNext=NULL;
+                UTIL_Remove( item );
+                continue;
+            }
+            CBasePlayerWeapon *weapon=(CBasePlayerWeapon *)item;
+            weapon->m_iPrimaryAmmoType=weapon->pszAmmo1() ? CBasePlayer::GetAmmoIndex(weapon->pszAmmo1()) : -1;
+            weapon->m_iSecondaryAmmoType=weapon->pszAmmo2() ? CBasePlayer::GetAmmoIndex(weapon->pszAmmo2()) : -1;
+            boxItems[validCount++]=item;
+        }
+        CBasePlayerItem *unusedActive=NULL, *unusedLast=NULL;
+        XGLua_RebuildItemChains( boxItems, validCount, box->m_rgpPlayerItems, MAX_ITEM_TYPES,
+            unusedActive, unusedLast, []( CBasePlayerItem *item ) { int slot=item->iItemSlot(); return slot<0 || slot>=MAX_ITEM_TYPES ? -1 : slot; } );
+    }
+
+    // Includes unowned ground weapons; player and box chains were unlinked
+    // first. UTIL_Remove is deferred, so skip entities already marked for it.
+    for( size_t i=0; i<g_TrackedWeapons.size(); ++i )
+    {
+        edict_t *edict=g_TrackedWeapons[i].edict;
+        if( !XGLua_IsTrackedWeapon( edict ) || (edict->v.flags & FL_KILLME) ) continue;
+        CLuaWeapon *weapon=(CLuaWeapon *)edict->pvPrivateData;
+        if( weapon->m_xglRestoreMissing ) UTIL_Remove( weapon );
+    }
 }

@@ -183,6 +183,12 @@ public:
 
 	// shared ammo slots
 	int	m_rgAmmo[MAX_AMMO_SLOTS];
+	// Save-side index maps permit Lua weapon/ammo registration changes.
+	int m_xglSaveVersion;
+	string_t m_xglAmmoNames[MAX_AMMO_SLOTS];
+	string_t m_xglWeaponNames[MAX_WEAPONS];
+	bool m_xglRestorePending;
+
 	int	m_rgAmmoLast[MAX_AMMO_SLOTS];
 
 	Vector				m_vecAutoAim;

@@ -99,6 +99,9 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_pLastItem, FIELD_CLASSPTR ),
 
 	DEFINE_ARRAY( CBasePlayer, m_rgAmmo, FIELD_INTEGER, MAX_AMMO_SLOTS ),
+	DEFINE_FIELD( CBasePlayer, m_xglSaveVersion, FIELD_INTEGER ),
+	DEFINE_ARRAY( CBasePlayer, m_xglAmmoNames, FIELD_STRING, MAX_AMMO_SLOTS ),
+	DEFINE_ARRAY( CBasePlayer, m_xglWeaponNames, FIELD_STRING, MAX_WEAPONS ),
 	DEFINE_FIELD( CBasePlayer, m_idrowndmg, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_idrownrestored, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_tSneaking, FIELD_TIME ),
@@ -2906,6 +2909,9 @@ ReturnSpot:
 
 void CBasePlayer::Spawn( void )
 {
+	// XGLua: new/respawned players are not save-restoration candidates.
+	m_xglRestorePending = false;
+	m_xglSaveVersion = 0;
 	m_flStartCharge = gpGlobals->time;
 	pev->classname = MAKE_STRING( "player" );
 	pev->health = 100;
@@ -3052,6 +3058,7 @@ void CBasePlayer::Precache( void )
 
 int CBasePlayer::Save( CSave &save )
 {
+	XGLua_PreparePlayerSave( this );
 	if( !CBaseMonster::Save( save ) )
 		return 0;
 
@@ -3072,6 +3079,8 @@ int CBasePlayer::Restore( CRestore &restore )
 		return 0;
 
 	int status = restore.ReadFields( "PLAYER", this, m_playerSaveData, ARRAYSIZE( m_playerSaveData ) );
+	m_xglRestorePending = status != 0;
+	if( m_xglRestorePending ) XGLua_MarkRestoredPlayer( this );
 
 	SAVERESTOREDATA *pSaveData = (SAVERESTOREDATA *)gpGlobals->pSaveData;
 	// landmark isn't present.
