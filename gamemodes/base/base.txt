@@ -1,0 +1,6 @@
+"base"
+{
+    "title"     "Base"
+    "author"    "XGLua"
+    "menusystem" "0"
+}
