@@ -20,7 +20,10 @@ static void XGLua_CheckTraceKeys( lua_State *L, bool hull )
 	{
 		if( lua_type( L, -2 ) != LUA_TSTRING )
 			luaL_error( L, "trace options must use named fields" );
-		const char *key = lua_tostring( L, -2 );
+		size_t keyLength = 0;
+		const char *key = lua_tolstring( L, -2, &keyLength );
+		if( memchr( key, '\0', keyLength ) )
+			luaL_error( L, "trace option names must not contain NUL bytes" );
 		if( strcmp( key, "start" ) && strcmp( key, "endpos" ) &&
 			strcmp( key, "filter" ) && strcmp( key, "ignoremonsters" ) &&
 			!( hull && !strcmp( key, "hull" ) ) )
