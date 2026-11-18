@@ -297,6 +297,7 @@ static CBasePlayer *Ply( lua_State *L, int idx )
 #include "xglua_entity_geometry.h"
 #include "xglua_entity_state.h"
 #include "xglua_player_api.h"
+#include "xglua_player_extra.h"
 
 static int Ply_Nick( lua_State *L )
 {
@@ -545,6 +546,13 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "Nick", Ply_Nick },		// convenience: GMod allows on Entity too
 		{ "Name", Ply_Name },
 		{ "Alive", Ply_Alive },
+		{ "IsObserver", Ply_IsObserver },
+		{ "GetFOV", Ply_GetFOV },
+		{ "IsOnTrain", Ply_IsOnTrain },
+		{ "IsUsing", Ply_IsUsing },
+		{ "InVehicle", Ply_InVehicle },
+		{ "IsFrozen", Ply_IsFrozen },
+		{ "IsGodMode", Ply_IsGodMode },
 		{ "Frags", Ply_Frags },
 		{ "Deaths", Ply_Deaths },
 		{ "Team", Ply_Team },
