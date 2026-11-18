@@ -26,6 +26,24 @@ SOLID_BBOX           = 2     -- interact on bbox, not inside
 SOLID_SLIDEBOX       = 3     -- try to slide up/bold surfaces, not step
 SOLID_BSP            = 4     -- bsp poly, brush entity
 
+-- IN_* -- HL1 usercmd button masks (common/const.h)
+IN_ATTACK           = 1
+IN_JUMP             = 2
+IN_DUCK             = 4
+IN_FORWARD          = 8
+IN_BACK             = 16
+IN_USE              = 32
+IN_CANCEL           = 64
+IN_LEFT             = 128
+IN_RIGHT            = 256
+IN_MOVELEFT         = 512
+IN_MOVERIGHT        = 1024
+IN_ATTACK2          = 2048
+IN_RUN              = 4096
+IN_RELOAD           = 8192
+IN_ALT1             = 16384
+IN_SCORE            = 32768
+
 -- DMG_* -- damage types (HL1, dlls/cbase.h style bitflags)
 DMG_GENERIC          = 0
 DMG_CRUSH            = 1

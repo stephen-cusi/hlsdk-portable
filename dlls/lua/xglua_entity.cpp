@@ -295,6 +295,7 @@ static CBasePlayer *Ply( lua_State *L, int idx )
 }
 
 #include "xglua_entity_geometry.h"
+#include "xglua_entity_state.h"
 
 static int Ply_Nick( lua_State *L )
 {
@@ -523,6 +524,17 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "GetOwner", Ent_GetOwner },
 		{ "SetOwner", Ent_SetOwner },
 		{ "GetGroundEntity", Ent_GetGroundEntity },
+		{ "GetMoveType", Ent_GetMoveType },
+		{ "GetSolid", Ent_GetSolid },
+		{ "WaterLevel", Ent_WaterLevel },
+		{ "OnGround", Ent_OnGround },
+		{ "IsOnGround", Ent_OnGround },
+		{ "Crouching", Ply_Crouching },
+		{ "Armor", Ply_Armor },
+		{ "Ping", Ply_Ping },
+		{ "KeyDown", Ply_KeyDown },
+		{ "KeyPressed", Ply_KeyPressed },
+		{ "KeyReleased", Ply_KeyReleased },
 		{ "EmitSound", Ent_EmitSound },
 		{ "StopSound", Ent_StopSound },
 		{ "Spawn", Ent_Spawn },
