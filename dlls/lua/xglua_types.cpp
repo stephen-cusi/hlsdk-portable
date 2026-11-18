@@ -54,6 +54,11 @@ void XGLua_PushVector( lua_State *L, const Vector &v )
 	XGLua_NewVec( L, v.x, v.y, v.z );
 }
 
+void XGLua_PushAngle( lua_State *L, const Vector &v )
+{
+	XGLua_NewAngle( L, v.x, v.y, v.z );
+}
+
 Vector XGLua_CheckVector( lua_State *L, int idx )
 {
 	XGLuaVec *v = XGLua_CheckVec( L, idx );

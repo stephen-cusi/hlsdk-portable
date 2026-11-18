@@ -294,6 +294,8 @@ static CBasePlayer *Ply( lua_State *L, int idx )
 	return (CBasePlayer *)pEnt;
 }
 
+#include "xglua_entity_geometry.h"
+
 static int Ply_Nick( lua_State *L )
 {
 	lua_pushstring( L, STRING( VARS( XGLua_CheckEntity( L, 1 ) )->netname ) );
@@ -325,15 +327,6 @@ static int Ply_GetActiveWeapon( lua_State *L )
 	return 1;
 }
 
-static int Ply_GetAimVector( lua_State *L )
-{
-	CBasePlayer *p = Ply( L, 1 );
-	UTIL_MakeVectors( p->pev->v_angle );
-	extern void XGLua_PushVector( lua_State *L, const Vector &v );
-	XGLua_PushVector( L, gpGlobals->v_forward );
-	return 1;
-}
-
 static int Ply_ViewPunch( lua_State *L )
 {
 	CBasePlayer *p = Ply( L, 1 );
@@ -349,14 +342,6 @@ static int Ply_EyePos( lua_State *L )
 	CBasePlayer *p = Ply( L, 1 );
 	extern void XGLua_PushVector( lua_State *L, const Vector &v );
 	XGLua_PushVector( L, p->pev->origin + p->pev->view_ofs );
-	return 1;
-}
-
-static int Ply_EyeAngles( lua_State *L )
-{
-	CBasePlayer *p = Ply( L, 1 );
-	extern void XGLua_PushVector( lua_State *L, const Vector &v );
-	XGLua_PushVector( L, p->pev->v_angle );
 	return 1;
 }
 
@@ -512,6 +497,11 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "EntIndex", Ent_EntIndex },
 		{ "GetClass", Ent_GetClass },
 		{ "GetPos", Ent_GetPos },
+		{ "GetFeetPos", Ent_GetFeetPos },
+		{ "WorldSpaceCenter", Ent_WorldSpaceCenter },
+		{ "OBBMins", Ent_OBBMins },
+		{ "OBBMaxs", Ent_OBBMaxs },
+		{ "GetCollisionBounds", Ent_GetCollisionBounds },
 		{ "SetPos", Ent_SetPos },
 		{ "GetAngles", Ent_GetAngles },
 		{ "SetAngles", Ent_SetAngles },
@@ -542,6 +532,7 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "GetAimVector", Ply_GetAimVector },
 		{ "ViewPunch", Ply_ViewPunch },
 		{ "EyePos", Ply_EyePos },
+		{ "ShootPos", Ply_ShootPos },
 		{ "EyeAngles", Ply_EyeAngles },
 		{ "Give", Ply_Give },
 		{ "GiveAmmo", Ply_GiveAmmo },
