@@ -7,6 +7,7 @@
 *
 ****/
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -28,6 +29,8 @@ extern "C" {
 #include "xglua_gamemode.h"
 
 lua_State *g_xglua_L = NULL;
+
+#include "xglua_console.h"
 
 static char g_szGameDir[256] = "";
 
@@ -349,6 +352,7 @@ void XGLua_Init( void )
 {
 	g_engfuncs.pfnAddServerCommand( "lua_run", XGLua_LuaRun_f );
 	g_engfuncs.pfnAddServerCommand( "lua_openscript", XGLua_LuaOpenScript_f );
+	g_engfuncs.pfnAddServerCommand( "lua_cmd", XGLua_LuaCmd_f );
 	CVAR_REGISTER( &xgl_gamemode );
 }
 
@@ -484,6 +488,7 @@ void XGLua_Startup( void )
 	// game libraries
 	XGLua_RegisterEntityLibs( L );
 	XGLua_RegisterWeaponLibs( L );
+	XGLua_RegisterConsole( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
 	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadEngineScript, g_szGameDir, XGLua_ReportError ) )
