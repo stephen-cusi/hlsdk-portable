@@ -1,6 +1,6 @@
 # XGLua — Xash3D / HL1 的 GLua 风格 LuaJIT 脚本系统设计文档
 
-> 版本：v0.1 草案　日期：2026-11-17
+> 版本：v0.2 草案（整合 TWHL / VDC / hlsdk-portable / Xash3D FWGS 资料后修订）　日期：2026-11-18
 > 工作代号：**XGLua**（可随意改名）
 > 目标一句话：**让 HL1 mod 作者像写 Garry's Mod 一样，用 Lua 写游戏模式、实体、武器、HUD 和网络逻辑。**
 
@@ -27,6 +27,9 @@
 15. [示例脚本](#15-示例脚本)
 16. [里程碑](#16-里程碑)
 17. [风险与待验证清单](#17-风险与待验证清单)
+18. [多平台与 Android](#18-多平台与-android)
+19. [HL1 / GoldSrc 机制速查及其对设计的影响](#19-hl1--goldsrc-机制速查及其对设计的影响)
+20. [参考资料](#20-参考资料)
 
 ---
 
@@ -62,6 +65,8 @@
 | **A. 集成进 mod 的 gamedll / client dll（推荐）** | 基于 `hlsdk-portable` 派生一份 mod 源码，新增 `lua/` 模块，同时编进服务端 DLL 与客户端 DLL | 不改引擎；所有 Xash3D 平台共用；符合 GoldSrc 的"mod 即游戏逻辑"传统；Android 打包简单 | 需要使用你自己编译的 `hl.dll` / `client.dll`，原版 Valve DLL 不能直接用 |
 | B. 修改 xash3d-fwgs 引擎 | 在引擎里嵌 Lua，通过新增 API 暴露给 DLL | 能拿到更多内部数据（网络、渲染） | 需要维护引擎分支；用户必须用你的引擎；与上游合并成本高 |
 | C. Metamod 插件 | 做成 Metamod 模块 | 能给现有服务器加脚本 | 仅服务端；客户端 HUD/渲染做不了；HL1 版 Metamod 在 Xash 上兼容性需评估 |
+
+**基线 SDK 选择：`FWGS/hlsdk-portable`。** 它是 Xash3D 生态事实上的标准 SDK：同时提供 CMake 与 waf 构建，自带 `android/` Gradle 工程，并有面向 iOS、Switch 等平台的构建说明。Featureful SDK（基于 hlsdk-portable，自带自定义 `delta.lst`）可借鉴其网络字段设计；Half-Life Unified SDK 功能强，但面向 Steam 版 GoldSrc / 桌面平台，不适合作为多平台基线。完整的仓库结构、需要改动的 SDK 位置和构建矩阵见配套文件 `docs/INTEGRATION.md`（随项目骨架 zip 提供）。
 
 **结论：采用方案 A。** 引擎保持原样，所有 Lua 逻辑以"mod 侧库"形式存在。若后续发现某些能力（如字体渲染、任意网络包）必须由引擎提供，再以**最小补丁 + 向上游提 PR** 的方式处理，而不是 fork 长期分叉。
 
@@ -299,6 +304,7 @@ msvcbuild.bat static             # Windows（x64 / x86 分别在对应的 VS 命
 | macOS x64 / ARM64 | ✅ JIT | 设置 `MACOSX_DEPLOYMENT_TARGET` |
 | Android ARMv7 / ARM64 / x86 / x86_64 | ✅ JIT | 用 NDK 交叉编译（宿主与目标位宽需一致，32 位目标需 32 位宿主工具或 `-m32` 的 host cc） |
 | iOS | ⚠️ 系统禁止 JIT | 解释器模式运行（`-DLUAJIT_DISABLE_JIT`），性能下降但可用 |
+| Nintendo Switch / PS Vita / 3DS / Wii / Xbox（Xash3D 的各移植分支） | ⚠️ 逐平台评估（多数没有可执行内存页，JIT 不可用） | 默认走 **PUC Lua 5.1** 后备；若平台允许再试 LuaJIT 解释器模式 |
 | E2K / RISC-V / 其他 | ❌ LuaJIT 不支持 | **降级到 PUC-Rio Lua 5.1** + `bit` 库兼容层，FFI 路径全部走 `lua_CFunction` 后备实现 |
 
 > Xash3D FWGS 本身支持不少冷门架构，所以 **"绑定层必须同时有 FFI 版和 lua_CFunction 版"** 这条要在 M1 阶段就定好，否则后面补成本很高。
@@ -357,12 +363,23 @@ struct EntHandle { int index; int serial; };   // 对应 edict_t::serialnumber
 | 普通 API | `lua_CFunction` | `Entity:SetModel`、`Player:Give`、`ents.Create` |
 | 复杂对象构造 | Lua 层封装 | `scripted_ents`、`weapons`、`net` 高层 API |
 
-### 6.4 单位与坐标
+### 6.4 单位、原点与碰撞盒（与 GMod 的关键差异）
 
-HL1 单位与 GMod 的量纲相同（1 unit ≈ 1/16 英尺），Vector/Angle 的含义一致，**无需换算**。差异点：
+Vector / Angle 的含义与 GMod 一致（`Angle` 为 pitch, yaw, roll）。**但碰撞盒与原点约定不同，移植 GMod 脚本最容易在这里出错：**
 
-- HL1 `Angle` 为 `(pitch, yaw, roll)`，与 GMod 一致；
-- 地面碰撞盒、站立/蹲伏 hull 尺寸不同（HL1: 站立 `(-16,-16,-36)~(16,16,36)`，GMod 为 72 高）——**文档里要显式写出**，避免移植 GMod 脚本时踩坑。
+| 项目 | HL1 / GoldSrc | GMod / Source |
+|------|---------------|---------------|
+| 玩家站立 hull | `(-16,-16,-36)` ~ `(16,16,36)`，32×32×72 | `(-16,-16,0)` ~ `(16,16,72)`，高度同为 72 |
+| 玩家蹲伏 hull | `(-16,-16,-18)` ~ `(16,16,18)`，32×32×36 | 高度 36 |
+| **实体原点** | **在 hull 中心**（站立时原点离脚底 36 单位） | **在脚底** |
+| 世界碰撞 | 预编译的 clip hull（见第 19 章），不是任意 AABB | 任意 OBB / 物理对象 |
+
+设计决策：
+
+1. `Entity:GetPos()` 默认返回引擎原始 `pev->origin`（hull 中心），**不做隐式换算**，避免行为不一致；
+2. 另提供 `Entity:GetFeetPos()`（脚底 Z = `origin.z + mins.z`）、`Entity:WorldSpaceCenter()`、`Entity:OBBMins()/OBBMaxs()`，文档里显著标注"GMod 脚本里 `GetPos()+Vector(0,0,N)` 要重新计算"；
+3. 提供兼容开关 `xgl_gmod_origin 1`（默认 0）：打开后对 **Player** 的 `GetPos/SetPos` 使用脚底原点，仅用于快速移植旧脚本；
+4. `util.TraceHull` 的 hull 参数用常量 `HULL_POINT / HULL_HUMAN / HULL_LARGE / HULL_HEAD`（对应 0/1/2/3），**不接受任意尺寸**——这是 BSP 编译期决定的；实体之间的碰撞（`SetCollisionBounds`）则是 AABB，可任意设置。
 
 ---
 
@@ -481,8 +498,8 @@ IsBot IsAdmin IsSuperAdmin IsConnected
 | `PlayerSay` | ply, text, teamonly | `ClientCommand("say"/"say_team")` | 返回字符串替换内容，返回 `""` 吞掉 |
 | `PlayerDeath` | victim, inflictor, attacker | `CBasePlayer::Killed` | |
 | `DoPlayerDeath` | ply, attacker, dmginfo | 同上（早于 `PlayerDeath`） | |
-| `PlayerShouldTakeDamage` | ply, attacker | `CBasePlayer::TakeDamage` | 返回 `false` 免伤 |
-| `EntityTakeDamage` | ent, dmginfo | `CBaseEntity::TakeDamage`（所有实体） | 可改 `dmginfo` 或返回 `true` 阻止 |
+| `PlayerShouldTakeDamage` | ply, attacker | `CBasePlayer::TakeDamage` / `CGameRules::FPlayerCanTakeDamage` ⚠️ 待确定统一接入点 | 返回 `false` 免伤；需验证单人和无模式行为以及重复派发 |
+| `EntityTakeDamage` | ent, dmginfo | ⚠️ 具体接入点和覆盖范围待验证 | 可改 `dmginfo` 或返回 `true` 阻止；多个实体重写 `TakeDamage`，不能仅在基类接线后宣称覆盖所有实体 |
 | `PlayerCanPickupWeapon` | ply, wep | `CBasePlayerItem::AddToPlayer` 前 | |
 | `PlayerCanPickupItem` | ply, item | 物品 `Touch` | |
 | `PlayerSwitchWeapon` | ply, old, new | `SelectItem` | |
@@ -497,6 +514,31 @@ IsBot IsAdmin IsSuperAdmin IsConnected
 | `SetupPlayerVisibility` | ply, viewent | `SetupVisibility` | 用于添加额外 PVS |
 | `ShouldCollide` | ent1, ent2 | `pfnShouldCollide`（⚠️ 若引擎导出）| |
 | `AllowPlayerPickup` / `GravGunPickupAllowed` | — | — | 无对应物，**不实现** |
+
+#### 8.1.1 游戏模式 ↔ `CGameRules`（HL1 的规则层）
+
+HL1 的 DM/SP 规则放在 `CGameRules` 的子类里（`CHalfLifeRules` 单人、`CHalfLifeMultiplay` 多人），由 `InstallGameRules()` 创建。**Lua 游戏模式的正确落点是子类化 `CHalfLifeMultiplay` 得到 `CLuaGameRules`，把虚函数转发给 `GM`**，而不是到处改 `CBasePlayer`。下表中的函数名来自 HLSDK 的 `gamerules.h`；标 ⚠️ 的为凭记忆列出，需对照实际头文件确认。
+
+> **实现核验待办：** 此分支的 `InstallGameRules()` 还会选择 teamplay 和 busters 规则。`CLuaGameRules` 的适用范围、单人模式及与 8.1 已有 hook 的派发次序和去重均需先核对；`CGameRules` 不是所有实体伤害的统一入口。Lua 回调可同步删除实体，相关调用链的生存期安全必须先解决。
+
+| `GM:` 回调 | 对应 `CGameRules` 虚函数 | 说明 |
+|-----------|--------------------------|------|
+| `PlayerSpawn(ply)` | `PlayerSpawn` | 玩家出生前最后一步 |
+| `PlayerShouldTakeDamage(ply, attacker)` | `FPlayerCanTakeDamage` | 返回 `false` 免伤 |
+| `PlayerSelectSpawn(ply)` | `GetPlayerSpawnSpot` | 返回出生点实体 |
+| `PlayerDeath(victim, inflictor, attacker)` | `PlayerKilled` | 每次玩家死亡 |
+| `GetPointsForKill(attacker, victim)` | `IPointsForKill` | HL 特有，GMod 无对应 |
+| `AllowMonsters()` | `FAllowMonsters` | |
+| `PlayerSwitchWeapon(ply, old, new)` | `FShouldSwitchWeapon` | |
+| `GetNextBestWeapon(ply, cur)` | `GetNextBestWeapon` | 武器用完后的自动切换 |
+| `GetFallDamage(ply)` | `FlPlayerFallDamage` | 返回伤害值 |
+| `ShouldAutoAim(ply, target)` | `ShouldAutoAim` | |
+| `Think()` | `CHalfLifeMultiplay::Think` | 每帧规则逻辑（换图、倒计时） |
+| `PlayerDisconnected(ply)` | `ClientDisconnected` | |
+| `PlayerCanPickupWeapon / Item` | `CanHavePlayerItem` ⚠️ 等 | |
+| `PlayerCanRespawn / PlayerSpawnTime` | `FPlayerCanRespawn` / `FlPlayerSpawnTime` ⚠️ | |
+
+> `base` 游戏模式 = 不覆盖任何回调时，`CLuaGameRules` 直接调用 `CHalfLifeMultiplay` 的原版实现，从而保证"装上 XGLua 不写脚本"与原版 DM 行为一致。
 
 ### 8.2 客户端：GMod Hook ←→ 客户端 DLL 入口
 
@@ -623,6 +665,8 @@ GMod 的 `NetworkVar` 在 HL1 上没有现成通道。设计为**两级后端**�
 | **快速槽** | 复用 `entity_state_t` 的 `iuser1~4` / `fuser1~4` / `vuser1~4`（⚠️ 先确认哪些已被原版 DLL 占用，如 `iuser3/4` 常被武器/玩家状态占用） | 约 12 个 | 随实体帧同步，自带 PVS 与增量压缩，延迟最低 |
 | **溢出通道** | 超出的变量走 `net` 底层通道，由服务端对每个实体维护脏位，变更时向 PVS 内玩家发包 | 无硬限制（受带宽约束） | 稍慢，但通用 |
 
+> **关于"快速槽"的现实约束**（来自 TWHL 教程与 SDK 源码的观察）：原版 SDK 已经占用了一部分 `iuser/fuser/vuser` 字段——例如自定义弹药教程把额外弹药塞进 `clientdata_t` 的 `vuser2/vuser3`，"添加用户变量"教程把 `iuser4` 用作"服务端更新"标志。动手前必须**逐字段盘点占用**；字段能否被网络同步以及占多少位，由 `delta.lst` 决定。mod 可以自带 `delta.lst`（Featureful SDK 就这么做，例如把 `clientdata_t/weapon_data_t` 的 `m_iId` 扩到 6 位以支持更多武器的预测），因此本项目**必须随 mod 发行自己的 `delta.lst`**，并提供 `tools/check_delta.py` 检查快速槽与 `delta.lst` 是否一致。
+
 `NetworkVar` 的 `Int/Float/Bool/String/Vector/Angle/Entity` 类型映射到上述后端，并生成 `Get<Name>/Set<Name>`；`SetNW*/GetNW*`（按名字的动态变量）一律走溢出通道。
 
 ### 9.5 SWEP：脚本化武器（**风险最高的模块**）
@@ -633,6 +677,13 @@ HL1 的武器有**客户端预测**：`cl_dll/hl/hl_weapons.cpp` 里有一份与
 |------|------|------|------|
 | **P1：服务端权威** | SWEP 只在服务端运行；视觉效果（视图模型动画、枪口火焰、声音）通过**服务端发起 `PLAYBACK_EVENT` 或 `net`** 通知客户端；该武器标记为 `lw = 0`（禁用客户端预测） | 有延迟（LAN/低 ping 下可接受） | 低 |
 | **P2：共享预测** | 把 `SWEP:PrimaryAttack / SecondaryAttack / Reload / Think` 在**客户端预测环节**（`HUD_WeaponsPostThink` 一类）也执行一次，但**只允许调用"可预测 API 子集"**：`SendWeaponAnim`、`SetNextPrimaryFire`、`EmitSound`（本地）、`ViewPunch`、`ShootBullet`（客户端只播特效不造成伤害）等 | 接近原版 | 高，需严格限制 API |
+
+**武器系统的硬约束（来自 TWHL「Weapons Programming」系列与 Featureful 文档）**
+
+- 每把武器需要**唯一的武器 ID** 与唯一的 `slot + position` 组合；
+- 武器 ID 要通过网络做客户端预测，默认 `delta.lst` 里 `m_iId` 位宽偏小（Featureful 把它扩到 6 位以支持更多武器）。所以 Lua 武器**不能"想要多少有多少"**：设计成**预留 ID 池**（如 `WEAPON_LUA_1..N`），`weapons.Register` 时分配，N 由 `delta.lst` 位宽决定；
+- 客户端预测代码在 `cl_dll/hl/hl_weapons.cpp`：`HUD_WeaponsPostThink` 里按武器 ID 选择客户端本地武器对象。Lua 武器的 P2（预测）方案就是在这里放一个通用的 `CLuaWeaponClient` 并转发给客户端 Lua；
+- 预测可以整体关闭：`cl_lw 0`，或编译时不定义 `CLIENT_WEAPONS`（把客户端逻辑退回服务端）——这正是 P1「服务端权威」方案的依据。
 
 SWEP 表格式（与 GMod 一致）：
 
@@ -726,7 +777,7 @@ net.Start("my_other_msg"); net.WriteString("hi"); net.SendToServer()
 
 | 方向 | 可用通道 | 限制 | 设计 |
 |------|----------|------|------|
-| 服务端→客户端 | **用户消息（User Message）** `svc_usermessage` | 单条载荷很小（⚠️ 约 192~255 字节，以引擎实际值为准，**设计取保守值 ≤ 180 字节**）；消息类型数量有上限（≤ 255 个，大量被原版占用） | **只注册一条** `XGLNet` 用户消息（变长），其载荷头包含 `msgid(uint16)` `flags` `seq` `fragindex`，自己做**分片与重组** |
+| 服务端→客户端 | **用户消息（User Message）** `svc_usermessage` | GoldSrc（协议 48）单条用户消息**最大 192 字节**（带字符串时有效载荷约 188）；消息名**不宜超过 12 字节**（TWHL 评论区的经验值，⚠️ 实测确认）；用户消息种类上限：GoldSrc 约 128，Xash3D 191 | **只注册一条** `XGLNet`（6 字节，满足长度限制）的变长用户消息，载荷头含 `msgid(uint16)` `flags` `seq` `fragindex`，自己做**分片与重组**。**分片大小运行时协商**：默认按 GoldSrc 保守值（≤ 160 字节有效载荷），检测到 Xash 协议 49 时可放大（旧版 Xash3D 更新日志称用户消息上限提升到 2048 字节，⚠️ 必须对 FWGS 当前版本实测后才能启用） |
 | 客户端→服务端 | **字符串命令**（`pfnServerCmd` → `ClientCommand`） | 单条命令 ≤ 255 字符，且受引擎命令速率限制 | 将二进制载荷 **Base64/Base85 编码**，命令形如 `xgln <seq> <idx>/<total> <chunk>`；服务端组装 |
 | 大块数据（Lua 文件下发） | 自建流 | — | 压缩 + 分片 + 确认窗口；按客户端维护**发送预算**，避免撑爆可靠通道（HL1 可靠缓冲溢出会直接把客户端踢出） |
 
@@ -1004,6 +1055,10 @@ end
 | 字体渲染受限（11.1） | HUD 表现力有限 | v1 用引擎字体；v2 自带字体图集 |
 | 存档/读档（9.1） | Lua 实体状态丢失 | v1 声明不支持；v2 用 `SAVERESTOREDATA` 序列化 |
 | 无真实 SteamID（7.5） | 持久身份/权限系统 | 提供 `UniqueID` 机制；权限系统用 `xgl_admins.txt` 按 AuthID + 密码/token |
+| 武器 ID 位宽受 `delta.lst` 限制（9.5 / 19.5） | Lua 武器数量上限 | 预留 ID 池 + 自带 `delta.lst`（位宽扩到 6 位）；超出数量的武器降级为服务端权威（`cl_lw` 关） |
+| 原点/碰撞约定与 GMod 不同（6.4） | 移植脚本行为错误 | `GetFeetPos`、`xgl_gmod_origin` 兼容开关、文档与示例 |
+| 协议 48/49 与用户消息大小差异（10.2 / 19.3） | 分片大小选错导致断线 | 默认保守 160 字节；协议/引擎探测后再放大；压测 |
+| 64 位 mod 库需单独编译（18.1） | 发行物数量增多 | CI 矩阵自动产出；LuaJIT 按目标各编一次 |
 | 许可证 | 合规 | LuaJIT：MIT；`hlsdk-portable`：Valve SDK License（沿用其条款）；Xash3D FWGS：GPLv3（只做动态加载关系，注意各平台分发条款） |
 
 ### 动手前建议先做的 5 个小实验（半天~1 天）
@@ -1013,6 +1068,121 @@ end
 3. 注册一条 `XGLNet` 用户消息，实测**单条最大载荷**与连续发送的可靠通道上限；
 4. 读 `cl_dll` 与 Xash3D 的 `HUD_VidInit` / 连接流程，确定客户端 VM 的创建点；
 5. 做一个最小 `HUDPaint`：在屏幕上画一个矩形和一行引擎字体文字。
+
+---
+
+## 18. 多平台与 Android
+
+> 具体的目录、构建命令、需要改动的 SDK 文件见 `docs/INTEGRATION.md`；这里只列设计层面的决定。
+
+### 18.1 支持矩阵
+
+| 平台 | 产物 | Lua 后端 | 备注 |
+|------|------|----------|------|
+| Windows x86 / x64 | `hl.dll` `client.dll` | LuaJIT（JIT） | |
+| Linux x86 / x64 / ARM / ARM64 | `.so` | LuaJIT（JIT） | 32 位需 `-m32` 与 32 位 host 工具 |
+| macOS x64 / ARM64 | `.dylib` | LuaJIT（JIT） | |
+| **Android** armv7 / arm64 / x86 / x86_64 | 打进 mod APK 的 `libserver` / `libclient` | LuaJIT（JIT） | 引擎由单独的 Xash3D FWGS APK 提供 |
+| iOS / iPadOS | dylib | LuaJIT 解释器（`LUAJIT_DISABLE_JIT`） | 系统禁止 JIT |
+| Switch / Vita / 3DS / Wii / Xbox / e2k / RISC-V | 视移植而定 | PUC Lua 5.1 后备（必要时再评估 LuaJIT 解释器） | 绑定层必须有无 FFI 实现 |
+
+> **64 位提醒**：Xash3D FWGS 虽支持 64 位引擎，但官方文档明确说明 **mod 库必须针对对应位数重新编译**。所以每个发行版本都要为每个架构各出一份库，LuaJIT 也随之各编一次。
+
+### 18.2 Android 专项设计
+
+1. **打包形态**：沿用 hlsdk-portable 的 `android/` 工程；mod APK 通过 Intent 启动引擎 APK，并传入 `gamedir`。mod 的 `libserver` / `libclient` 由引擎 APK 加载。
+2. **存储**：游戏数据放在用户存储中的 xash 目录（历史上是 `/sdcard/xash/<gamedir>`；新版 Android 的分区存储策略 ⚠️ 以引擎 APK 当前行为为准）。因此 **Lua 核心库内嵌进 `.so`**（用 `tools/pack_lua.py` 生成 C 数组），用户目录里的 `lua/` 只作扩展与覆盖，避免用户拷漏文件、也避免读取路径问题。
+3. **文件系统**：所有 Lua 文件读取走**引擎文件接口**（支持 `.pk3` / `.pk3dir`，并带大小写不敏感模拟——Linux/Android 文件系统大小写敏感，而 GMod 脚本常常大小写混用）；`file.*` 写入仅限 `<gamedir>/data/`。
+4. **触屏**：提供 `mobile` 库：`mobile.IsTouch()`、`mobile.Vibrate(ms)`（引擎有 Mobility API）；HUD 需考虑触控按钮布局，`HUDPaint` 示例要给出触屏适配写法。
+5. **资源紧张**：Android 默认 VM 内存上限更低（服务端 96 MB / 客户端 64 MB，可配置）、GC 更积极、`Think/HUDPaint` 的单帧 Lua 预算告警（`xgl_budget_ms`）。
+6. **JIT 在 Android 上可用**（含 arm64），所以不必像 iOS 那样降级；但仍要为每个 ABI 单独构建 LuaJIT。
+7. **调试**：Android 上 `lua_run` 不方便，提供 `xgl_log_to_file 1` 把 Lua 日志写到 `data/xgl.log`，并提供 `adb logcat` 友好的前缀（`[XGLua]`）。
+
+### 18.3 测试矩阵
+
+- **纯 Lua 层**（`tests/lua/`）：在 CI 里用 `luajit` 直接跑，覆盖 `hook`/`timer`/`string`/`table`/语法预处理，不依赖引擎；
+- **引擎冒烟测试**：桌面平台用 Xash3D dedicated server 加载 mod，跑一组 `lua_run` 断言；
+- **Android**：CI 只保证 APK 构建通过；真机/模拟器测试放在发布前手工清单；
+- **网络**：本地起 1 服务端 + 2 客户端（含一个高延迟/丢包条件，如 Linux `tc netem`）测试 `net` 分片与重发。
+
+---
+
+## 19. HL1 / GoldSrc 机制速查及其对设计的影响
+
+> 资料来源：TWHL wiki / VERC 归档文章、VDC（Xash3D 与 GoldSrc 页面）、AlliedModders 的 HL1 引擎消息文档、hlsdk-portable 与 Featureful SDK 文档。详见第 20 章。
+
+### 19.1 实体系统
+
+| 机制 | 要点 | 对 XGLua 的影响 |
+|------|------|-----------------|
+| 类名 → C++ 类 | 地图用类名放置实体；`LINK_ENTITY_TO_CLASS(mapName, className)` 把类名链接到 C++ 类，并且**同一个 C++ 类可以被多个类名链接**（Valve 自己就这么做，如 `weapon_9mmhandgun` 与 `weapon_glock`） | Lua 的"简单变体"（换模型/血量/伤害）可直接复用原版 C++ 类，通过类名 + 键值覆盖，而不必每个变体都走 `CLuaEntity` |
+| 变体实现的陷阱 | 变体类的 `Spawn` 里若强制设置了 `pev->classname` 或模型，会覆盖关卡设计师的键值 | `ents.Create` 对原版类设置键值后再 `Spawn`；文档提示该陷阱 |
+| 存档 | 实体成员要在 `Save/Restore` 里通过 `TYPEDESCRIPTION` + `DEFINE_FIELD` 登记，否则读档/换图会损坏 | Lua 实体 v1 声明"不支持存档/换图保留"；v2 通过 `FIELD_STRING` 序列化 `luaclass` 与 Lua 状态 |
+| 实体指针 | 原版代码大量用 `edict_t*` / `entvars_t*` / `CBaseEntity*` 互转，实体被删除后指针悬挂 | 采用第 6.2 的 `{index, serial}` 句柄，所有访问做有效性校验 |
+| 命名与类名 | `classname`、`targetname`、`target` 是关卡逻辑的核心（`trigger_*`、`multi_manager`） | `ents.FindByName`、`ent:Fire(input)` 要与原版 `target/targetname` 机制互通；`ENT:KeyValue` 覆盖所有自定义键值 |
+
+### 19.2 碰撞与 hull
+
+- 世界碰撞使用 BSP 里**编译期预生成的 clip hull**：hull 0 = 点（物理面）、hull 1 = 站立玩家 32×32×72、hull 2 = 大型怪物 64×64×64、hull 3 = 蹲伏玩家 32×32×36（DMC 等 mod 的尺寸不同）。
+- 实体之间的碰撞用 AABB；`MOVETYPE_STEP/WALK` 类实体与世界碰撞时，**使用最接近的预编译 hull**，而不是它自己设定的任意尺寸（TWHL 论坛上 `func_pushable` 的案例说明了这一点）。
+- 关卡可以用 `info_hullshape` 自定义 hull 形状；VHLT 可通过 `-nohull#` 等关闭某些 hull。
+
+**影响**：`SetCollisionBounds` 只影响实体间碰撞；`util.TraceHull` 只接受 `HULL_*` 常量；文档要明确"没有物理引擎，没有 `PhysObj`，`SetModelScale` 之类的碰撞缩放不可用"。
+
+### 19.3 用户消息与协议
+
+> **本地源码核验（未做端到端测试）：** 当前 `xash3d-fwgs-20/engine/common/protocol.h` 将 `PROTOCOL_VERSION` 定义为 49、`MAX_USER_MESSAGES` 定义为 197；`engine/common/common.h` 将服务端 `MAX_USERMSG_LENGTH` 定义为 2048。客户端边界处理可能不同，实际可注册数量、单条可用载荷和可靠通道容量仍需逐项核对与实测；下文的 191 和 2048 均不能视为已验证的运行时限制。
+
+- GoldSrc 用户消息：`REG_USER_MSG(name, size)` 注册，`size = -1` 表示变长；单条最大 **192 字节**；`MESSAGE_BEGIN(MSG_ONE / MSG_ALL / MSG_BROADCAST …)` 发送，`MSG_*_UNRELIABLE` 变体不可靠；
+- 协议：Xash3D FWGS 的主协议是 **49**；协议 48（Xash 旧版与 GoldSrc 兼容版）已不推荐；服务端原生只支持 49，混用 GoldSrc 48 的 mod 可借助 `gsmrf` 兼容模式把 48 的消息即时转换为 49；
+- 引擎上限（VDC 页面所列）：用户消息种类 Xash3D 191；`MAX_EDICTS` 默认 600–8192，可通过 `gameinfo.txt` 调整；精灵/模型/声音预缓存上限均高于 GoldSrc。
+
+**影响**：第 10 章的 `net` 传输层以 192 字节为保守基线，再按协议/引擎探测放大；只占用 1 个用户消息槽位，避免与原版及其他 mod 抢位。
+
+### 19.4 状态同步（delta 压缩）
+
+- 实体与客户端状态通过 `entity_state_t`、`entity_state_player_t`、`custom_entity_state_t`、`clientdata_t`、`weapon_data_t` 的**增量压缩**同步，字段与位宽由 **`delta.lst`** 描述，服务端启动时解析并同步给客户端；
+- 因此：自定义网络字段 ≈ 复用已有结构体字段（`iuser/fuser/vuser` 等）+ 调整 `delta.lst`；
+- 事件（`PLAYBACK_EVENT`）是 HL1 武器特效预测的核心通道，`FEV_RELIABLE` 可靠事件在带宽不足时会分片发送。
+
+**影响**：9.4 的 `NetworkVar` 快速槽方案；`PLAYBACK_EVENT` 用于 Lua 武器的枪口火焰/弹壳等预测特效（客户端需要有对应的事件处理 C++ 或通用 Lua 事件）。
+
+### 19.5 武器系统
+
+- 服务端类层次：`CBasePlayerItem` → `CBasePlayerWeapon`；每把武器 `GetItemInfo` 填 `iSlot/iPosition/iMaxClip/iId/...`，并通过 `WeaponList` 用户消息告知客户端 HUD；
+- 客户端预测：`cl_dll/hl/hl_weapons.cpp` 中保留一份几乎相同的武器逻辑（`HUD_WeaponsPostThink`），`cl_lw` 控制是否启用；
+- 动画是**模型序列号**，由 QC 的顺序决定，而不是 `ACT_*` 名字；玩家持握模型有固定的几种（`crowbar / trip / onehanded / python / shotgun / gauss / mp5 / rpg / egon / squeak / hive / bow`）。
+
+**影响**：见 9.5。`SWEP.PlayerModel` 要提供合法取值校验。
+
+### 19.6 引擎内置限制速查（Xash3D vs GoldSrc）
+
+| 项目 | GoldSrc（旧 / 新） | Xash3D（FWGS 视配置） |
+|------|--------------------|------------------------|
+| `MAX_EDICTS` 默认 | 900 / 1200 | 600–8192（服务端下发，客户端自适应） |
+| `MAX_EDICTS` 绝对上限 | 2048 | 8192 |
+| 用户消息种类 | 128 | 191 |
+| 预缓存模型 | 512 | 1024（FWGS 4096） |
+| 预缓存声音 | 512 | 2048 |
+| 可见实体包大小 | 256 / 1024 | 2048 |
+
+> 数值为 VDC 页面与社区资料所列的"典型值"，**会随版本与配置变化**，只作设计量级参考；`ents` 库与 `net` 库不要把任何一个上限硬编码，应在运行时读取引擎当前值。
+
+---
+
+## 20. 参考资料
+
+- Xash3D FWGS 引擎与文档：https://github.com/FWGS/xash3d-fwgs
+- hlsdk-portable（基线 SDK）：https://github.com/FWGS/hlsdk-portable
+- Featureful SDK 与其 `delta.lst` 文档：https://github.com/FreeSlave/halflife-featureful ，https://freeslave.github.io/halflife-featureful/docs/configuration/delta-lst
+- Half-Life Unified SDK：https://github.com/twhl-community/halflife-unified-sdk
+- VDC：Xash3D 页面 https://developer.valvesoftware.com/wiki/Xash3D ；GoldSrc Programming 分类 https://developer.valvesoftware.com/wiki/Category:GoldSrc_Programming
+- TWHL wiki：Entity Programming - Overview（https://twhl.info/wiki/page/Entity_Programming_-_Overview/6084）；Weapons Programming - High-Level Overview（https://twhl.info/wiki/page/Weapons_Programming_-_High-Level_Overview）；Weapons Programming - Custom Ammo Types（https://twhl.info/wiki/page/Weapons_Programming_-_Custom_Ammo_Types）；Wavelength: How to create a server-client message（https://twhl.info/wiki/page/Wavelength%3A_How_to_create_a_server-client_message）；VERC: Adding User Variables to Half-Life（https://twhl.info/wiki/page/VERC:_Adding_User_Variables_to_Half-Life）；HULL #（https://twhl.info/wiki/page/HULL_/8169）
+- TWHL 论坛：Half-Life Updated（https://twhl.info/thread/view/20055）——关于 `CLIENT_WEAPONS` / `cl_lw` 的讨论
+- AlliedModders：Half-Life 1 Engine Messages（https://wiki.alliedmods.net/Half-Life_1_Engine_Messages）——delta 压缩与引擎消息格式
+- GoldSrc `gamerules.h` 源码（P4HL 镜像等）——`CGameRules` 虚函数列表
+
+> 说明：Source 引擎（HL2/GMod）一侧的 VDC 页面（如 Prediction、Networking Events & Messages）讲的是 **Source** 的机制，**不能**直接套用到 GoldSrc；本文只用它们做 GMod 行为对照。
 
 ---
 
