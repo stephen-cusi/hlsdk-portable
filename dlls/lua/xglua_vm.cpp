@@ -23,6 +23,7 @@ extern "C" {
 #include "lauxlib.h"
 }
 #include "xglua_vm_include.h"
+#include "xglua_vm_vfs.h"
 // M4 first batch: server gamemode chain (header-only, this is the only TU)
 #include "xglua_gamemode.h"
 
@@ -34,6 +35,20 @@ static char g_szGameDir[256] = "";
 #define XGLUA_SWEP_REGISTRY "XGLua_SWEPTables"
 
 void XGLua_GetSWEPRegistry( lua_State *L );
+
+static XGLuaReadStatus XGLua_ReadEngineScript( void *ctx, const char *rel, char **out, size_t *len )
+{
+	if( !g_engfuncs.pfnLoadFileForMe || !g_engfuncs.pfnFreeFile )
+		return XGLua_ReadDiskScript( ctx, rel, out, len );
+	return XGLua_ReadVFSFile( "lua/", rel, g_engfuncs.pfnLoadFileForMe, g_engfuncs.pfnFreeFile, out, len );
+}
+
+static XGLuaReadStatus XGLua_ReadEngineRoot( void *ctx, const char *rel, char **out, size_t *len )
+{
+	if( !g_engfuncs.pfnLoadFileForMe || !g_engfuncs.pfnFreeFile )
+		return XGLua_ReadDiskRoot( ctx, rel, out, len );
+	return XGLua_ReadVFSFile( "", rel, g_engfuncs.pfnLoadFileForMe, g_engfuncs.pfnFreeFile, out, len );
+}
 
 //===========================================================================
 // helpers
@@ -68,7 +83,7 @@ static bool XGLua_LoadScriptChecked( lua_State *L, const char *relpath )
         ALERT( at_console, "[XGLua] invalid script path\n" );
         return false;
     }
-    int status = XGLua_ExecuteScript( L, relative, XGLua_ReadDiskScript, g_szGameDir, 0 );
+    int status = XGLua_ExecuteScript( L, relative, XGLua_ReadEngineScript, g_szGameDir, 0 );
     if( status != XGLUA_READ_OK )
     {
         XGLua_ReportError( L, "script load" );
@@ -183,7 +198,7 @@ static int XGLua_FrameTime( lua_State *L )
 
 static int XGLua_include( lua_State *L )
 {
-	const int n = XGLua_IncludeImpl( L, XGLua_ReadDiskScript, g_szGameDir );
+	const int n = XGLua_IncludeImpl( L, XGLua_ReadEngineScript, g_szGameDir );
 	if( n < 0 ) return lua_error( L );
 	return n;
 }
@@ -401,6 +416,18 @@ void XGLua_Startup( void )
 		}
 	}
 
+	if( !szChosen && g_engfuncs.pfnLoadFileForMe && g_engfuncs.pfnFreeFile )
+	{
+		// The bootstrap can live entirely in an engine-mounted archive. The
+		// reported directory is still used for disk-only automatic scanning.
+		char *probe = NULL;
+		size_t probeLen = 0;
+		if( XGLua_ReadEngineScript( g_szGameDir, "includes/init.lua", &probe, &probeLen ) == XGLUA_READ_OK )
+		{
+			free( probe );
+			szChosen = g_szGameDir;
+		}
+	}
 	if( !szChosen )
 	{
 		ALERT( at_console, "[XGLua] FAILED to locate lua/includes/init.lua, VM not started\n" );
@@ -459,7 +486,7 @@ void XGLua_Startup( void )
 	XGLua_RegisterWeaponLibs( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
-	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadDiskScript, g_szGameDir, XGLua_ReportError ) )
+	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadEngineScript, g_szGameDir, XGLua_ReportError ) )
 	{
 		ALERT( at_console, "[XGLua] core init failed, VM not started\n" );
 		return;
@@ -475,7 +502,7 @@ void XGLua_Startup( void )
 		if( szMode && szMode[0] )
 		{
 			char szGMError[256];
-			XGLua_GMResult gm = XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, g_szGameDir,
+			XGLua_GMResult gm = XGLua_LoadGamemodeChain( L, XGLua_ReadEngineRoot, g_szGameDir,
 				szMode, szGMError, sizeof( szGMError ) );
 			if( gm == XGLUA_GM_OK )
 				ALERT( at_console, "[XGLua] gamemode loaded: %s\n", szMode );
