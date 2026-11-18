@@ -51,6 +51,7 @@ HULL_POINT           = 0     -- 0x0x0
 HULL_HUMAN           = 1     -- standard player hull
 HULL_LARGE           = 2     -- multiple of human hull (large monsters)
 HULL_SMALL_CENTERED  = 3     -- small hull centered on origin
+HULL_HEAD            = 3     -- HL1 head_hull alias; same as HULL_SMALL_CENTERED
 
 -- USE_* -- entity "use" output modes (HL1)
 USE_OFF              = 0

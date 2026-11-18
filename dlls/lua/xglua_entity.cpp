@@ -455,6 +455,8 @@ static int player_GetAll( lua_State *L )
 	return 1;
 }
 
+#include "xglua_util_trace.h"
+
 static int util_ThrowGrenade( lua_State *L )
 {
 	edict_t *pThrower = NULL;
@@ -577,6 +579,10 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 	lua_newtable( L );
 	lua_pushcfunction( L, util_ThrowGrenade );
 	lua_setfield( L, -2, "ThrowGrenade" );
+	lua_pushcfunction( L, util_TraceLine );
+	lua_setfield( L, -2, "TraceLine" );
+	lua_pushcfunction( L, util_TraceHull );
+	lua_setfield( L, -2, "TraceHull" );
 	lua_setglobal( L, "util" );
 
 	// Entity( index ) global constructor
