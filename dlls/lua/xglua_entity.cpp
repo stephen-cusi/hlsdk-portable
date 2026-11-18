@@ -456,6 +456,7 @@ static int player_GetAll( lua_State *L )
 }
 
 #include "xglua_util_trace.h"
+#include "xglua_entity_queries.h"
 
 static int util_ThrowGrenade( lua_State *L )
 {
@@ -531,6 +532,7 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "Nick", Ply_Nick },		// convenience: GMod allows on Entity too
 		{ "Alive", Ply_Alive },
 		{ "GetActiveWeapon", Ply_GetActiveWeapon },
+		{ "UserID", Ply_UserID },
 		{ "GetAimVector", Ply_GetAimVector },
 		{ "ViewPunch", Ply_ViewPunch },
 		{ "EyePos", Ply_EyePos },
@@ -560,6 +562,9 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "Create", ents_Create },
 		{ "GetAll", ents_GetAll },
 		{ "FindByClass", ents_FindByClass },
+		{ "FindByName", ents_FindByName },
+		{ "FindInSphere", ents_FindInSphere },
+		{ "FindInBox", ents_FindInBox },
 		{ NULL, NULL }
 	};
 	for( const luaL_Reg *f = entslib; f->name; f++ )
@@ -573,7 +578,23 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 	lua_newtable( L );
 	lua_pushcfunction( L, player_GetAll );
 	lua_setfield( L, -2, "GetAll" );
+	lua_pushcfunction( L, player_GetBots );
+	lua_setfield( L, -2, "GetBots" );
+	lua_pushcfunction( L, player_GetHumans );
+	lua_setfield( L, -2, "GetHumans" );
+	lua_pushcfunction( L, player_GetByUserID );
+	lua_setfield( L, -2, "GetByUserID" );
 	lua_setglobal( L, "player" );
+
+	// game library
+	lua_newtable( L );
+	lua_pushcfunction( L, game_GetMap );
+	lua_setfield( L, -2, "GetMap" );
+	lua_pushcfunction( L, game_MaxPlayers );
+	lua_setfield( L, -2, "MaxPlayers" );
+	lua_pushcfunction( L, game_GetWorld );
+	lua_setfield( L, -2, "GetWorld" );
+	lua_setglobal( L, "game" );
 
 	// util library
 	lua_newtable( L );
