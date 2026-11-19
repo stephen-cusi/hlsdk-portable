@@ -343,6 +343,8 @@ BOOL CLuaWeapon::CanDeploy( void )
 		// clip weapon: deployable if clip or reserve ammo available
 		if( m_iClip > 0 )
 			return TRUE;
+		if( m_pPlayer && m_iPrimaryAmmoType >= 0 && m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] > 0 )
+			return TRUE;
 	}
 	return CBasePlayerWeapon::CanDeploy();
 }
@@ -350,25 +352,43 @@ BOOL CLuaWeapon::CanDeploy( void )
 void CLuaWeapon::ItemPostFrame( void )
 {
 	if( !m_pPlayer ) return;
-	// Complete a pending DefaultReload using the engine's server clock.
-	if( m_fInReload && m_pPlayer->m_flNextAttack <= UTIL_WeaponTimeBase() )
+
+	// 1. Complete a pending reload when the attack/reload timer expires.
+	if( m_fInReload )
 	{
+		if( m_pPlayer->m_flNextAttack > UTIL_WeaponTimeBase() )
+			return;
+
 		int n = Q_min( iMaxClip() - m_iClip, m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] );
-		m_iClip += n;
-		m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] -= n;
+		if( n > 0 )
+			m_iClip += n;
+		if( m_iPrimaryAmmoType >= 0 && n > 0 )
+			m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] -= n;
 		m_pPlayer->TabulateAmmo();
 		m_fInReload = FALSE;
 	}
+
 	XGLuaSWEPInfo *swep = XGLua_FindSWEP( m_szLuaClass );
 	if( !swep ) return;
+
 	int buttons = m_pPlayer->pev->button;
 	int pressed = m_pPlayer->m_afButtonPressed;
+
+	// 2. Manual reload request (only when not already reloading)
+	if( ( buttons & IN_RELOAD ) && !m_fInReload )
+	{
+		Reload();
+		return;
+	}
+
+	// 3. Block primary/secondary fire and idle override while reloading
+	if( m_fInReload )
+		return;
+
 	if( ( buttons & IN_ATTACK2 ) && ( swep->secondaryAutomatic || ( pressed & IN_ATTACK2 ) ) && gpGlobals->time >= m_flNextSecondaryAttack )
 		SecondaryAttack();
 	else if( ( buttons & IN_ATTACK ) && ( swep->primaryAutomatic || ( pressed & IN_ATTACK ) ) && gpGlobals->time >= m_flNextPrimaryAttack )
 		PrimaryAttack();
-	else if( ( buttons & IN_RELOAD ) && !m_fInReload )
-		Reload();
 	else if( !( buttons & ( IN_ATTACK | IN_ATTACK2 ) ) )
 	{
 		ResetEmptySound();
@@ -595,7 +615,7 @@ static int Wep_DefaultReload( lua_State *L )
 		clip <= w->m_iClip || clip > w->iMaxClip() || delay < 0 )
 	{ lua_pushboolean( L, false ); return 1; }
 	BOOL result = w->DefaultReload( clip, anim, delay );
-	if( result ) w->m_flTimeWeaponIdle = XGLua_WeaponIdleDeadline( gpGlobals->time, 3.0f );
+	if( result ) w->m_flTimeWeaponIdle = gpGlobals->time + delay + 0.25f;
 	lua_pushboolean( L, result );
 	return 1;
 }

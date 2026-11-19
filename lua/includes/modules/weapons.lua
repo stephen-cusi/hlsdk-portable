@@ -97,6 +97,16 @@ StoredWeapons.weapon_base = WeaponBase
 
 --[[---------------------------------------------------------------------------
 	Name: weapons.Register( swep_table, className )
+--	Desc: Registers a SWEP table under the given class name. The table's
+--		ClassName field is set to className (normalized to lower case,
+--		matching GMod). Re-registering replaces the previous table.
+--
+--	Contracts (M5 P1):
+--	- Scripts in lua/weapons/ MUST explicitly call weapons.Register(SWEP, "class")
+--	  at the end of the file; folder loading does not auto-register.
+--	- Any sound path passed to self:EmitSound(...) MUST be listed in
+--	  SWEP.PrecacheSounds so GoldSrc precaches it on the server; unprecached
+--	  sounds are silently dropped by the engine.
 	Desc: Registers a SWEP table under the given class name. The table's
 		ClassName field is set to className (normalized to lower case,
 		matching GMod). Re-registering replaces the previous table.
