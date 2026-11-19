@@ -18,6 +18,7 @@
 // fabs/index macros clash with MSVC <cmath>.
 #include "lua/xglua_netcodec.h"
 #include "lua/xglua_netfrag.h"
+#include "lua/xglua_nwvar.h"
 #include "hud.h"
 #include "cl_util.h"
 #include "lua/xglua_cl.h"
@@ -30,6 +31,7 @@ extern "C" {
 
 static std::vector<std::string> g_CLNetStrings;
 static XGLuaNetReassembler g_CLReassembler;
+static XGLuaNWStore g_CLNWStore;
 static uint16_t g_CLNextSeq = 1;
 
 static bool g_CLWriting = false;
@@ -213,6 +215,31 @@ static int clnet_SendToServer( lua_State *L )
 	return 0;
 }
 
+static int clnw_GetBool( lua_State *L )
+{
+	const XGLuaNWValue *v = g_CLNWStore.Get( (uint16_t)luaL_checkinteger( L, 1 ), luaL_checkstring( L, 2 ) );
+	lua_pushboolean( L, ( v && v->type == XGLUA_NW_BOOL ) ? ( v->b ? 1 : 0 ) : lua_toboolean( L, 3 ) );
+	return 1;
+}
+static int clnw_GetInt( lua_State *L )
+{
+	const XGLuaNWValue *v = g_CLNWStore.Get( (uint16_t)luaL_checkinteger( L, 1 ), luaL_checkstring( L, 2 ) );
+	lua_pushnumber( L, ( v && v->type == XGLUA_NW_INT ) ? (double)v->i : luaL_optnumber( L, 3, 0 ) );
+	return 1;
+}
+static int clnw_GetFloat( lua_State *L )
+{
+	const XGLuaNWValue *v = g_CLNWStore.Get( (uint16_t)luaL_checkinteger( L, 1 ), luaL_checkstring( L, 2 ) );
+	lua_pushnumber( L, ( v && v->type == XGLUA_NW_FLOAT ) ? (double)v->f : luaL_optnumber( L, 3, 0 ) );
+	return 1;
+}
+static int clnw_GetString( lua_State *L )
+{
+	const XGLuaNWValue *v = g_CLNWStore.Get( (uint16_t)luaL_checkinteger( L, 1 ), luaL_checkstring( L, 2 ) );
+	lua_pushstring( L, ( v && v->type == XGLUA_NW_STRING ) ? v->s.c_str() : luaL_optstring( L, 3, "" ) );
+	return 1;
+}
+
 static int clnet_Receive( lua_State *L )
 {
 	const char *name = luaL_checkstring( L, 1 );
@@ -256,6 +283,7 @@ static void HandleStringTableSync( const std::vector<uint8_t> &payload )
 		return;
 	g_CLNetStrings.clear();
 	XGLua_CL_MemVFSClear();
+	g_CLNWStore.Reset();
 	for( uint32_t i = 0; i < count; ++i )
 	{
 		uint32_t id = r.ReadUInt( 16 );
@@ -313,6 +341,14 @@ static int __MsgFunc_XGLNet( const char *pszName, int iSize, void *pbuf )
 	if( hdr.flags & XGLUA_NET_FLAG_CSLUA )
 	{
 		HandleCSLuaFile( full );
+		return 1;
+	}
+
+	if( hdr.flags & XGLUA_NET_FLAG_NWVAR )
+	{
+		XGLuaNetReader r;
+		r.Init( full.data(), full.size() );
+		g_CLNWStore.ApplyPacket( r );
 		return 1;
 	}
 
@@ -375,4 +411,20 @@ void XGLua_CL_RegisterNet( lua_State *L )
 		lua_setfield( L, -2, f->name );
 	}
 	lua_setglobal( L, "net" );
+
+	lua_newtable( L );
+	static const luaL_Reg nwlib[] =
+	{
+		{ "GetBool",   clnw_GetBool },
+		{ "GetInt",    clnw_GetInt },
+		{ "GetFloat",  clnw_GetFloat },
+		{ "GetString", clnw_GetString },
+		{ NULL, NULL }
+	};
+	for( const luaL_Reg *f = nwlib; f->name; ++f )
+	{
+		lua_pushcfunction( L, f->func );
+		lua_setfield( L, -2, f->name );
+	}
+	lua_setglobal( L, "nw" );
 }

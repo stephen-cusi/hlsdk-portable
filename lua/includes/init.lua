@@ -29,6 +29,7 @@ include( "includes/modules/weapons.lua" )
 include( "includes/modules/scripted_ents.lua" )
 include( "includes/modules/gamemode.lua" )
 include( "includes/modules/net.lua" )
+include( "includes/modules/nwvar.lua" )
 if CLIENT then
 	include( "includes/modules/draw.lua" )
 end

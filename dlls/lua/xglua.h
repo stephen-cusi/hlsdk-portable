@@ -74,6 +74,8 @@ void XGLua_NetClientPutInServer( CBasePlayer *pPlayer );
 void XGLua_NetClientDisconnect( CBasePlayer *pPlayer );
 BOOL XGLua_NetClientCommand( edict_t *pEntity );
 void XGLua_NetShutdown( void );
+void XGLua_NWClearEntity( int entIndex );
+void XGLua_RegisterNWEntityMethods( lua_State *L ); // attaches SetNW*/GetNW* to XGLua_Entity metatable
 void XGLua_ClearEntityCache( void );
 
 //

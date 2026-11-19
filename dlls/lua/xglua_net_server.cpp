@@ -21,6 +21,7 @@
 #include "xglua_safe.h"
 #include "lua/xglua_netcodec.h"
 #include "lua/xglua_netfrag.h"
+#include "lua/xglua_nwvar.h"
 #include "player.h"
 extern "C" {
 #include "lauxlib.h"
@@ -38,6 +39,8 @@ static cvar_t xgl_net_rate_limit  = { "xgl_net_rate_limit", "60" };
 //===========================================================================
 // Network string table (1-based IDs; case-insensitive like GMod)
 //===========================================================================
+
+static XGLuaNWStore g_NWStore;
 
 static std::vector<std::string> g_NetStrings;
 
@@ -202,6 +205,139 @@ static bool NetEnqueueMessage( int clientIdx, uint8_t flags, uint16_t msgId, con
 		cl.outQueue.push_back( qf );
 	}
 	return true;
+}
+
+void XGLua_NWClearEntity( int entIndex )
+{
+	if( entIndex >= 0 && entIndex <= 65535 )
+		g_NWStore.ClearEntity( (uint16_t)entIndex, true );
+}
+
+static void NetSyncNWVarsToClient( int clientIdx )
+{
+	static uint8_t scratch[XGLUA_NET_MAX_BYTES];
+	XGLuaNetWriter w;
+	w.Init( scratch, sizeof( scratch ) );
+	if( g_NWStore.EncodeSnapshot( w ) )
+		NetEnqueueMessage( clientIdx, XGLUA_NET_FLAG_NWVAR, 0, scratch, w.BytesWritten() );
+}
+
+static void NetBroadcastNWDelta( void )
+{
+	static uint8_t scratch[XGLUA_NET_MAX_BYTES];
+	XGLuaNetWriter w;
+	w.Init( scratch, sizeof( scratch ) );
+	if( !g_NWStore.EncodeDelta( w ) )
+		return;
+
+	int maxCl = gpGlobals ? gpGlobals->maxClients : 0;
+	if( maxCl > XGLUA_MAX_CLIENTS ) maxCl = XGLUA_MAX_CLIENTS;
+	for( int i = 1; i <= maxCl; ++i )
+	{
+		if( g_NetClients[i].connected )
+			NetEnqueueMessage( i, XGLUA_NET_FLAG_NWVAR, 0, scratch, w.BytesWritten() );
+	}
+}
+
+static uint16_t NWEntIndex( lua_State *L )
+{
+	edict_t *pent = XGLua_CheckEntity( L, 1 );
+	int idx = ENTINDEX( pent );
+	return ( idx >= 0 && idx <= 65535 ) ? (uint16_t)idx : 0;
+}
+
+static int Ent_SetNWBool( lua_State *L )   { g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeBool( lua_toboolean( L, 3 ) != 0 ) ); return 0; }
+static int Ent_SetNWInt( lua_State *L )    { g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeInt( (int32_t)luaL_checknumber( L, 3 ) ) ); return 0; }
+static int Ent_SetNWFloat( lua_State *L )  { g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeFloat( (float)luaL_checknumber( L, 3 ) ) ); return 0; }
+static int Ent_SetNWString( lua_State *L ) { g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeString( luaL_checkstring( L, 3 ) ) ); return 0; }
+static int Ent_SetNWVector( lua_State *L ) { Vector v = XGLua_CheckVector( L, 3 ); g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeVector( v.x, v.y, v.z ) ); return 0; }
+static int Ent_SetNWAngle( lua_State *L )  { Vector a = XGLua_CheckAngle( L, 3 ); g_NWStore.Set( NWEntIndex( L ), luaL_checkstring( L, 2 ), XGLuaNWValue::MakeAngle( a.x, a.y, a.z ) ); return 0; }
+static int Ent_SetNWEntity( lua_State *L )
+{
+	uint16_t idx = NWEntIndex( L );
+	const char *key = luaL_checkstring( L, 2 );
+	edict_t *target = lua_isnil( L, 3 ) ? NULL : XGLua_TryEntity( L, 3 );
+	int tidx = target ? ENTINDEX( target ) : 0;
+	g_NWStore.Set( idx, key, XGLuaNWValue::MakeEntity( ( tidx >= 0 && tidx <= 65535 ) ? (uint16_t)tidx : 0 ) );
+	return 0;
+}
+
+static int Ent_GetNWBool( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	lua_pushboolean( L, ( v && v->type == XGLUA_NW_BOOL ) ? ( v->b ? 1 : 0 ) : lua_toboolean( L, 3 ) );
+	return 1;
+}
+static int Ent_GetNWInt( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	lua_pushnumber( L, ( v && v->type == XGLUA_NW_INT ) ? (double)v->i : luaL_optnumber( L, 3, 0 ) );
+	return 1;
+}
+static int Ent_GetNWFloat( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	lua_pushnumber( L, ( v && v->type == XGLUA_NW_FLOAT ) ? (double)v->f : luaL_optnumber( L, 3, 0 ) );
+	return 1;
+}
+static int Ent_GetNWString( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	lua_pushstring( L, ( v && v->type == XGLUA_NW_STRING ) ? v->s.c_str() : luaL_optstring( L, 3, "" ) );
+	return 1;
+}
+static int Ent_GetNWVector( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	if( v && v->type == XGLUA_NW_VECTOR ) { XGLua_PushVector( L, Vector( v->v[0], v->v[1], v->v[2] ) ); return 1; }
+	if( !lua_isnoneornil( L, 3 ) ) { lua_pushvalue( L, 3 ); return 1; }
+	XGLua_PushVector( L, Vector( 0, 0, 0 ) );
+	return 1;
+}
+static int Ent_GetNWAngle( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	if( v && v->type == XGLUA_NW_ANGLE ) { XGLua_PushAngle( L, Vector( v->v[0], v->v[1], v->v[2] ) ); return 1; }
+	if( !lua_isnoneornil( L, 3 ) ) { lua_pushvalue( L, 3 ); return 1; }
+	XGLua_PushAngle( L, Vector( 0, 0, 0 ) );
+	return 1;
+}
+static int Ent_GetNWEntity( lua_State *L )
+{
+	const XGLuaNWValue *v = g_NWStore.Get( NWEntIndex( L ), luaL_checkstring( L, 2 ) );
+	if( v && v->type == XGLUA_NW_ENTITY && v->entIdx > 0 && gpGlobals && v->entIdx < gpGlobals->maxEntities )
+	{
+		edict_t *pent = INDEXENT( v->entIdx );
+		if( !FNullEnt( pent ) && !pent->free ) { XGLua_PushEntity( L, pent ); return 1; }
+	}
+	if( !lua_isnoneornil( L, 3 ) ) { lua_pushvalue( L, 3 ); return 1; }
+	lua_pushnil( L );
+	return 1;
+}
+
+void XGLua_RegisterNWEntityMethods( lua_State *L )
+{
+	luaL_getmetatable( L, "XGLua_Entity" );
+	if( lua_istable( L, -1 ) )
+	{
+		static const luaL_Reg nwmeta[] =
+		{
+			{ "SetNWBool",   Ent_SetNWBool },   { "GetNWBool",   Ent_GetNWBool },
+			{ "SetNWInt",    Ent_SetNWInt },    { "GetNWInt",    Ent_GetNWInt },
+			{ "SetNWFloat",  Ent_SetNWFloat },  { "GetNWFloat",  Ent_GetNWFloat },
+			{ "SetNWString", Ent_SetNWString }, { "GetNWString", Ent_GetNWString },
+			{ "SetNWVector", Ent_SetNWVector }, { "GetNWVector", Ent_GetNWVector },
+			{ "SetNWAngle",  Ent_SetNWAngle },  { "GetNWAngle",  Ent_GetNWAngle },
+			{ "SetNWEntity", Ent_SetNWEntity }, { "GetNWEntity", Ent_GetNWEntity },
+			{ NULL, NULL }
+		};
+		for( const luaL_Reg *f = nwmeta; f->name; ++f )
+		{
+			lua_pushcfunction( L, f->func );
+			lua_setfield( L, -2, f->name );
+		}
+	}
+	lua_pop( L, 1 );
 }
 
 static void NetSyncStringTableToClient( int clientIdx )
@@ -675,6 +811,8 @@ void XGLua_RegisterNetLibs( lua_State *L )
 
 	lua_pushcfunction( L, global_AddCSLuaFile );
 	lua_setglobal( L, "AddCSLuaFile" );
+
+	XGLua_RegisterNWEntityMethods( L );
 }
 
 void XGLua_NetFrame( lua_State *L )
@@ -682,6 +820,8 @@ void XGLua_NetFrame( lua_State *L )
 	(void)L;
 	if( !gmsgXGLNet || !gpGlobals )
 		return;
+
+	NetBroadcastNWDelta();
 
 	const double now = (double)gpGlobals->time;
 	int maxCl = gpGlobals->maxClients;
@@ -729,6 +869,7 @@ void XGLua_NetClientPutInServer( CBasePlayer *pPlayer )
 	g_NetClients[idx].connected = true;
 	NetSyncStringTableToClient( idx );
 	NetSyncCSLuaFilesToClient( idx );
+	NetSyncNWVarsToClient( idx );
 }
 
 void XGLua_NetClientDisconnect( CBasePlayer *pPlayer )
@@ -816,6 +957,7 @@ void XGLua_NetShutdown( void )
 	g_NetReading = false;
 	g_NetStrings.clear();
 	g_CSLuaFiles.clear();
+	g_NWStore.Reset();
 	for( int i = 0; i <= XGLUA_MAX_CLIENTS; ++i )
 		g_NetClients[i].Reset( 0.0 );
 }

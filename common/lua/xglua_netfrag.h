@@ -22,6 +22,7 @@
 #define XGLUA_NET_MAX_FRAGS    255
 #define XGLUA_NET_FLAG_STRTBL  0x01
 #define XGLUA_NET_FLAG_CSLUA   0x02
+#define XGLUA_NET_FLAG_NWVAR   0x04
 
 struct XGLuaNetFragHeader
 {
