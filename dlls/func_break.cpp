@@ -21,6 +21,7 @@
 */
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"	// XGLua
 #include "cbase.h"
 #include "saverestore.h"
 #include "func_break.h"
@@ -522,6 +523,17 @@ void CBreakable::TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vec
 //=========================================================
 int CBreakable::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	Vector vecTemp;
 
 	// if Attacker == Inflictor, the attack was a melee or other instant-hit attack.

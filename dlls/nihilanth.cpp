@@ -16,6 +16,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"
 #include "cbase.h"
 #include "monsters.h"
 #include "weapons.h"
@@ -1239,6 +1240,13 @@ void CNihilanth::CommandUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_
 
 int CNihilanth::TakeDamage( entvars_t* pevInflictor, entvars_t* pevAttacker, float flDamage, int bitsDamageType )
 {
+	float xglDamage = flDamage;
+	int xglType = bitsDamageType;
+	if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+		return 0;
+	flDamage = xglDamage;
+	bitsDamageType = xglType;
+
 	if( pevInflictor->owner == edict() )
 		return 0;
 

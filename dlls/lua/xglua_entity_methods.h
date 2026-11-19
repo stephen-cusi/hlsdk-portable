@@ -35,6 +35,20 @@ static int Ent_Index( lua_State *L )
 		}
 		lua_pop( L, 2 );
 	}
+	if( XGLua_IsLuaEntity( cls ) )
+	{
+		XGLua_GetSENTRegistry( L );
+		lua_pushstring( L, cls );
+		lua_rawget( L, -2 );
+		if( lua_istable( L, -1 ) )
+		{
+			lua_pushvalue( L, 2 );
+			lua_gettable( L, -2 ); // honors the Base __index chain
+			if( !lua_isnil( L, -1 ) ) return 1;
+			lua_pop( L, 1 );
+		}
+		lua_pop( L, 2 );
+	}
 	luaL_getmetatable( L, XGLUA_ENTITY_META );
 	lua_pushvalue( L, 2 );
 	lua_rawget( L, -2 );

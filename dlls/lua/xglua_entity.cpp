@@ -41,6 +41,12 @@ static edict_t *XGLua_ValidateEnt( XGLuaEntRef *ref )
 }
 
 #include "xglua_entity_handles.h"
+edict_t *XGLua_TryEntity( lua_State *L, int idx )
+{
+	XGLuaEntRef *ref = XGLua_TestEntityRef( L, idx );
+	return XGLua_ValidateEnt( ref );
+}
+
 #include "xglua_entity_spatial.h"
 
 struct XGLua_EntityFrameCtx { int maxSlots; int *sweepIndex; };
@@ -422,6 +428,16 @@ static int Ply_ChatPrint( lua_State *L )
 // ents / player / util libraries
 //===========================================================================
 
+static int Ent_SetNextThink( lua_State *L )
+{
+	edict_t *pent = XGLua_CheckEntity( L, 1 );
+	double t = luaL_checknumber( L, 2 );
+	if( !std::isfinite( t ) )
+		return luaL_argerror( L, 2, "nextthink time must be a finite float" );
+	VARS( pent )->nextthink = (float)t;
+	return 0;
+}
+
 static int ents_Create( lua_State *L )
 {
 	const char *cls = luaL_checkstring( L, 1 );
@@ -431,6 +447,11 @@ static int ents_Create( lua_State *L )
 	{
 		CBasePlayerItem *pItem = XGLua_SpawnLuaWeapon( cls, Vector( 0, 0, 0 ) );
 		pent = pItem ? pItem->edict() : NULL;
+	}
+	else if( XGLua_IsLuaEntity( cls ) )
+	{
+		CBaseEntity *pEnt = XGLua_SpawnLuaEntity( cls, Vector( 0, 0, 0 ) );
+		pent = pEnt ? pEnt->edict() : NULL;
 	}
 	else
 	{
@@ -513,6 +534,8 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "SetAngles", Ent_SetAngles },
 		{ "GetVelocity", Ent_GetVelocity },
 		{ "SetVelocity", Ent_SetVelocity },
+		{ "SetNextThink", Ent_SetNextThink },
+		{ "NextThink", Ent_SetNextThink },
 		{ "SetSolid", Ent_SetSolid },
 		{ "SetMoveType", Ent_SetMoveType },
 		{ "SetCollisionBounds", Ent_SetCollisionBounds },

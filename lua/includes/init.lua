@@ -26,6 +26,7 @@ end
 include( "includes/modules/hook.lua" )
 include( "includes/modules/timer.lua" )
 include( "includes/modules/weapons.lua" )
+include( "includes/modules/scripted_ents.lua" )
 include( "includes/modules/gamemode.lua" )
 
 -- Extensions (add functions onto the standard libraries)

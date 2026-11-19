@@ -524,6 +524,17 @@ int CBaseEntity::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 
 	if( !pev->takedamage )
 		return 0;
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 
 	// UNDONE: some entity types may be immune or resistant to some bitsDamageType
 	

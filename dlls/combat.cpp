@@ -22,6 +22,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"	// XGLua
 #include "cbase.h"
 #include "monsters.h"
 #include "soundent.h"
@@ -811,6 +812,19 @@ int CBaseMonster::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, f
 
 	if( !pev->takedamage )
 		return 0;
+	// XGLua: EntityTakeDamage gate. Players are skipped here: their own
+	// CBasePlayer::TakeDamage entry dispatches for them, and its explicit
+	// call to this base would otherwise double-fire the event.
+	if( !IsPlayer() )
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 
 	if( !IsAlive() )
 	{

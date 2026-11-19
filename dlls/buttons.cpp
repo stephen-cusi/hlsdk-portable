@@ -22,6 +22,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"	// XGLua
 #include "cbase.h"
 #include "saverestore.h"
 #include "doors.h"
@@ -413,6 +414,17 @@ void CBaseButton::KeyValue( KeyValueData *pkvd )
 //
 int CBaseButton::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	BUTTON_CODE code = ButtonResponseToTouch();
 
 	if( code == BUTTON_NOTHING )
@@ -1324,6 +1336,17 @@ int CButtonTarget::ObjectCaps( void )
 
 int CButtonTarget::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	Use( Instance( pevAttacker ), this, USE_TOGGLE, 0 );
 
 	return 1;

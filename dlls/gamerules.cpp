@@ -26,6 +26,7 @@
 #include	"skill.h"
 #include	"game.h"
 #include	"lua/xglua.h" // XGLua
+#include	"lua/xglua_gamerules.h" // XGLua
 
 extern edict_t *EntSelectSpawnPoint( CBaseEntity *pPlayer );
 
@@ -347,13 +348,13 @@ CGameRules *InstallGameRules( void )
 		{
 			// vanilla deathmatch
 			g_teamplay = 0;
-			return new CHalfLifeMultiplay;
+			return new CLuaGameRules;
 		}
 		else
 		{
 			// vanilla deathmatch??
 			g_teamplay = 0;
-			return new CHalfLifeMultiplay;
+			return new CLuaGameRules;
 		}
 	}
 }

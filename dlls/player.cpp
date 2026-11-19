@@ -453,6 +453,22 @@ int CBasePlayer::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 	if( !IsAlive() )
 		return 0;
 
+	// XGLua: player damage events. PlayerShouldTakeDamage first (strict
+	// false exempts this hit), then EntityTakeDamage like any entity
+	// (strict true cancels; damage/type modifications apply). Both run
+	// before the gamerules decision so Lua vetoes cannot be overridden
+	// by it, and neither fires for dead players.
+	if( !XGLua_PlayerShouldTakeDamage( this, pevInflictor, pevAttacker ) )
+		return 0;
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	// go take the damage first
 	CBaseEntity *pAttacker = CBaseEntity::Instance( pevAttacker );
 
@@ -1536,6 +1552,9 @@ void CBasePlayer::PlayerUse( void )
 	{
 		if( m_pTank != 0 )
 		{
+			// XGLua: PlayerUse veto before leaving tank control.
+			if( !XGLua_PlayerUse( this, m_pTank ) )
+				return;
 			// Stop controlling the tank
 			// TODO: Send HUD Update
 			m_pTank->Use( this, this, USE_OFF, 0 );
@@ -1545,6 +1564,9 @@ void CBasePlayer::PlayerUse( void )
 		{
 			if( m_afPhysicsFlags & PFLAG_ONTRAIN )
 			{
+				// XGLua: PlayerUse veto before any train state is cleared.
+				if( !XGLua_PlayerUse( this, Instance( pev->groundentity ) ) )
+					return;
 				m_afPhysicsFlags &= ~PFLAG_ONTRAIN;
 				m_iTrain = TRAIN_NEW|TRAIN_OFF;
 
@@ -1561,6 +1583,9 @@ void CBasePlayer::PlayerUse( void )
 
 				if( pTrain && !( pev->button & IN_JUMP ) && FBitSet( pev->flags, FL_ONGROUND ) && ( pTrain->ObjectCaps() & FCAP_DIRECTIONAL_USE ) && pTrain->OnControls( pev ) )
 				{
+					// XGLua: PlayerUse veto before entering train control.
+					if( !XGLua_PlayerUse( this, pTrain ) )
+						return;
 					m_afPhysicsFlags |= PFLAG_ONTRAIN;
 					m_iTrain = TrainSpeed( (int)pTrain->pev->speed, pTrain->pev->impulse );
 					m_iTrain |= TRAIN_NEW;
@@ -1617,12 +1642,27 @@ void CBasePlayer::PlayerUse( void )
 	{
 		//!!!UNDONE: traceline here to prevent USEing buttons through walls			
 		int caps = pObject->ObjectCaps();
+		const bool useOn =
+			( ( pev->button & IN_USE ) && ( caps & FCAP_CONTINUOUS_USE ) ) ||
+			( ( m_afButtonPressed & IN_USE ) && ( caps & ( FCAP_IMPULSE_USE | FCAP_ONOFF_USE ) ) );
+		const bool useOff =
+			( m_afButtonReleased & IN_USE ) && ( caps & FCAP_ONOFF_USE );
+		if( !useOn && !useOff )
+		{
+			if( m_afButtonPressed & IN_USE )
+				EMIT_SOUND( ENT(pev), CHAN_ITEM, "common/wpn_select.wav", 0.4, ATTN_NORM );
+			return;
+		}
+
+		// XGLua: PlayerUse veto after selecting a real Use transition, before
+		// sound, physics flags, or the target's Use callback.
+		if( !XGLua_PlayerUse( this, pObject ) )
+			return;
 
 		if( m_afButtonPressed & IN_USE )
 			EMIT_SOUND( ENT(pev), CHAN_ITEM, "common/wpn_select.wav", 0.4, ATTN_NORM );
 
-		if( ( ( pev->button & IN_USE ) && ( caps & FCAP_CONTINUOUS_USE ) ) ||
-			 ( ( m_afButtonPressed & IN_USE ) && ( caps & ( FCAP_IMPULSE_USE | FCAP_ONOFF_USE ) ) ) )
+		if( useOn )
 		{
 			if( caps & FCAP_CONTINUOUS_USE )
 				m_afPhysicsFlags |= PFLAG_USING;
@@ -1630,7 +1670,7 @@ void CBasePlayer::PlayerUse( void )
 			pObject->Use( this, this, USE_SET, 1 );
 		}
 		// UNDONE: Send different USE codes for ON/OFF.  Cache last ONOFF_USE object to send 'off' if you turn away
-		else if( ( m_afButtonReleased & IN_USE ) && ( pObject->ObjectCaps() & FCAP_ONOFF_USE ) )	// BUGBUG This is an "off" use
+		else if( useOff )	// BUGBUG This is an "off" use
 		{
 			pObject->Use( this, this, USE_SET, 0 );
 		}

@@ -14,6 +14,7 @@
 ****/
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"
 #include "cbase.h"
 #include "animation.h"
 #include "effects.h"
@@ -246,7 +247,11 @@ public:
 	void Precache( void );
 	void Touch( CBaseEntity *pOther );
 	void Think( void );
-	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType ) { Attack(); return 0; }
+	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
+	{
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &flDamage, &bitsDamageType ) ) return 0;
+		Attack(); return 0;
+	}
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void Attack( void );	
 	int Classify( void ) { return CLASS_BARNACLE; }
@@ -407,7 +412,11 @@ public:
 	void Precache( void );
 	void Touch( CBaseEntity *pOther );
 	void Think( void );
-	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType ) { Attack(); return 0; }
+	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
+	{
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &flDamage, &bitsDamageType ) ) return 0;
+		Attack(); return 0;
+	}
 	//void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void Attack( void ) {}
 

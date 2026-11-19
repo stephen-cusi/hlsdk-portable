@@ -162,17 +162,37 @@ endif()
 # see documentation: https://github.com/FWGS/xash3d-fwgs/blob/master/Documentation/extensions/library-naming.md
 include(LibraryNaming)
 
-# XGLua — engine-level LuaJIT shared library (external repo, built separately).
-# Produces dist/<arch>/lua_shared.{dll,lib}; linked by the game DLL as an import lib.
+# XGLua — engine-level LuaJIT library (external repo, built separately).
+# Windows: dist/<arch>/lua_shared.{dll,lib}, linked as an import library.
+# POSIX:   dist/<arch>/liblua_shared.a static archive. Android MUST link
+#          LuaJIT statically into the server library: the Android linker
+#          namespace does not search the game DLL directory for shared
+#          library dependencies, so a separate lua_shared.so would not be
+#          found at runtime. Desktop POSIX uses the static archive for
+#          parity (build it with -fPIC: see .github/workflows/xglua.yml).
 set(XGLUA_LUAJIT_DIR "${CMAKE_SOURCE_DIR}/../xglua-luajit" CACHE PATH
 	"Path to the xglua-luajit repo (LuaJIT fork + GLua dialect patches)")
-if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
-	message(STATUS "XGLua: lua_shared found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}")
-	set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
+if(MSVC)
+	if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
+		message(STATUS "XGLua: lua_shared found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}")
+		set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/lua_shared.lib")
+	else()
+		message(FATAL_ERROR
+			"XGLua: lua_shared.lib not found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/\n"
+			"Build it first: cd <xglua-luajit> && script\\build.bat ${BUILDARCH} dll")
+	endif()
 else()
-	message(FATAL_ERROR
-		"XGLua: lua_shared.lib not found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/\n"
-		"Build it first: cd <xglua-luajit> && script\\build.bat ${BUILDARCH} dll")
+	if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/liblua_shared.a")
+		message(STATUS "XGLua: liblua_shared.a found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}")
+		set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/liblua_shared.a")
+	else()
+		message(FATAL_ERROR
+			"XGLua: liblua_shared.a not found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/\n"
+			"Build LuaJIT first (exact commands in .github/workflows/xglua.yml):\n"
+			"  Linux:   make -j2 CC=\"gcc -fPIC -O2\" in xglua-luajit/src, then\n"
+			"           cp src/libluajit.a ../xglua-luajit/dist/${BUILDARCH}/liblua_shared.a\n"
+			"  Android: NDK cross build with STATIC_CC/DYNAMIC_CC set to the NDK clang")
+	endif()
 endif()
 
 if(XASH_PS4)

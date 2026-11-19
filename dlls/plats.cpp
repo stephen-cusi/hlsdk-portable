@@ -22,6 +22,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"
 #include "cbase.h"
 #include "trains.h"
 #include "saverestore.h"
@@ -2188,6 +2189,13 @@ void CGunTarget::Stop( void )
 
 int CGunTarget::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	float xglDamage = flDamage;
+	int xglType = bitsDamageType;
+	if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+		return 0;
+	flDamage = xglDamage;
+	bitsDamageType = xglType;
+
 	if( pev->health > 0 )
 	{
 		pev->health -= flDamage;

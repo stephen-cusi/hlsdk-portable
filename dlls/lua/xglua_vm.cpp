@@ -159,6 +159,104 @@ static void XGLua_LoadFolder( lua_State *L, const char *relfolder, bool recursiv
 }
 
 //===========================================================================
+// scripted entities — lua/entities/<name>.lua and <name>/init.lua
+//===========================================================================
+
+struct XGLua_AutoRegEntCtx { const char *classname; };
+
+static int XGLua_AutoRegisterEntityCore( lua_State *L, void *ud )
+{
+	XGLua_AutoRegEntCtx *ctx = (XGLua_AutoRegEntCtx *)ud;
+	lua_getglobal( L, "ENT" );
+	if( !lua_istable( L, -1 ) )
+		return 0;
+	lua_getglobal( L, "scripted_ents" );
+	if( !lua_istable( L, -1 ) )
+		return 0;
+	lua_getfield( L, -1, "Get" );
+	if( lua_isfunction( L, -1 ) )
+	{
+		lua_pushstring( L, ctx->classname );
+		if( lua_pcall( L, 1, 1, 0 ) != 0 )
+			return lua_error( L );
+		const bool already = lua_istable( L, -1 ) != 0;
+		lua_pop( L, 1 );
+		if( already )
+			return 0;
+	}
+	else
+	{
+		lua_pop( L, 1 );
+	}
+	lua_getfield( L, -1, "Register" );
+	if( !lua_isfunction( L, -1 ) )
+		return 0;
+	lua_pushvalue( L, -3 ); // ENT table
+	lua_pushstring( L, ctx->classname );
+	if( lua_pcall( L, 2, 0, 0 ) != 0 )
+		return lua_error( L );
+	return 0;
+}
+
+static void XGLua_LoadOneEntityFile( lua_State *L, const char *relpath, const char *classname )
+{
+	lua_newtable( L );
+	lua_setglobal( L, "ENT" );
+	if( XGLua_LoadScriptChecked( L, relpath ) )
+	{
+		XGLua_AutoRegEntCtx ctx = { classname };
+		XGLua_ProtectedCall( L, XGLua_AutoRegisterEntityCore, &ctx, XGLua_ReportError, "scripted_ents auto-register" );
+	}
+	lua_pushnil( L );
+	lua_setglobal( L, "ENT" );
+}
+
+static void XGLua_LoadEntitiesFolder( lua_State *L )
+{
+	char szDir[512];
+	snprintf( szDir, sizeof( szDir ), "%s/lua/entities/", g_szGameDir );
+
+	char szMask[600];
+	snprintf( szMask, sizeof( szMask ), "%s*", szDir );
+
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA( szMask, &fd );
+	if( h == INVALID_HANDLE_VALUE )
+		return;
+
+	do
+	{
+		if( fd.cFileName[0] == '.' )
+			continue;
+
+		if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+		{
+			char szRel[512];
+			snprintf( szRel, sizeof( szRel ), "entities/%s/init.lua", fd.cFileName );
+			XGLua_LoadOneEntityFile( L, szRel, fd.cFileName );
+		}
+		else
+		{
+			size_t len = strlen( fd.cFileName );
+			if( len > 4 && !stricmp( fd.cFileName + len - 4, ".lua" ) )
+			{
+				char szClass[64];
+				size_t copyLen = len - 4;
+				if( copyLen >= sizeof( szClass ) )
+					copyLen = sizeof( szClass ) - 1;
+				memcpy( szClass, fd.cFileName, copyLen );
+				szClass[copyLen] = '\0';
+
+				char szRel[512];
+				snprintf( szRel, sizeof( szRel ), "entities/%s", fd.cFileName );
+				XGLua_LoadOneEntityFile( L, szRel, szClass );
+			}
+		}
+	} while( FindNextFileA( h, &fd ) );
+	FindClose( h );
+}
+
+//===========================================================================
 // base globals
 //===========================================================================
 
@@ -526,6 +624,10 @@ void XGLua_Startup( void )
 	// 4b. snapshot SWEP tables into the C++ cache (ItemInfoArray etc.)
 	XGLua_BuildWeaponCache( L );
 
+	// 5. scripted entities — single files and <name>/init.lua folders
+	XGLua_LoadEntitiesFolder( L );
+	XGLua_BuildEntityCache( L );
+
 	ALERT( at_console, "[XGLua] scripts loaded, waiting for ServerActivate\n" );
 }
 
@@ -540,6 +642,7 @@ void XGLua_PostEntityInit( void )
 void XGLua_Shutdown( void )
 {
 	XGLua_ClearWeaponTracking();
+	XGLua_ClearEntityCache();
 	if( !g_xglua_L )
 		return;
 

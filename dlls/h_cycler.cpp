@@ -22,6 +22,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"	// XGLua
 #include "cbase.h"
 #include "monsters.h"
 #include "animation.h"
@@ -185,6 +186,17 @@ void CCycler::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useTy
 //void CCycler::Pain( float flDamage )
 int CCycler::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	if( m_animate )
 	{
 		pev->sequence++;
@@ -280,6 +292,17 @@ void CCyclerSprite::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE
 
 int CCyclerSprite::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	if( m_maxFrame > 1.0f )
 	{
 		Animate( 1.0f );

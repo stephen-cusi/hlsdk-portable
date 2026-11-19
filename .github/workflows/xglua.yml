@@ -1,0 +1,306 @@
+name: xglua
+
+# XGLua server library CI: builds the xglua-luajit LuaJIT side-library for
+# every target platform, then builds the hlsdk server library against it.
+#
+# Windows keeps the GMod-style split lua_shared.dll (import lib + dll next
+# to xash3d.exe). On Android LuaJIT is linked STATICALLY into the server
+# .so: the Android linker namespace does not search the game DLL directory
+# for shared-library dependencies, so a separate lua_shared.so would never
+# be found at runtime. Desktop Linux uses the static archive for parity.
+#
+# Android notes (why this job looks the way it does):
+#   - NDK is downloaded as the plain google zip (no sdkmanager/license step)
+#   - LuaJIT cross-compiles with the NDK single-toolchain clang via the
+#     STATIC_CC/DYNAMIC_CC/TARGET_LD/TARGET_AR make variables (LuaJIT does
+#     not accept the CROSS= prefix form with NDK r19+ unified toolchains)
+#   - the server .so is linked with -Wl,-z,max-page-size=16384 for Android
+#     15+ 16 KB page devices
+#   - the resulting hl_<arch>.so is meant for advanced manual installs;
+#     the official release path is the xash3d-fwgs launcher APK, which
+#     compiles hlsdk sources through gradle (externalNativeBuild)
+#
+# Checkout layout: this repo at $GITHUB_WORKSPACE, the LuaJIT fork at
+# $GITHUB_WORKSPACE/xglua-luajit (passed to CMake as XGLUA_LUAJIT_DIR).
+# If xglua-luajit is a private repo, grant the default GITHUB_TOKEN read
+# access to it (repo settings -> Actions -> workflow permissions), or add
+# a PAT as a secret and use `token:` on that checkout step.
+#
+# Runners: ubuntu-22.04 and windows-2022 were retired in 2026 (see
+# actions/runner-images#14254) - jobs use ubuntu-24.04 / windows-2025 /
+# windows-11-arm. MSVC environments are set up via vswhere + vcvarsall
+# (ilammy/msvc-dev-cmd is unmaintained; runner images ship VS Build Tools).
+
+on:
+  push:
+    branches: [ xglua, master ]
+  pull_request:
+    branches: [ xglua, master ]
+  workflow_dispatch:
+
+env:
+  LUAJIT_REPO: stephen-cusi/xglua-luajit
+  NDK_ZIP: https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+
+jobs:
+  windows-arm64:
+    # Primary development target: native ARM64 runner, same toolchain as dev.
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout hlsdk
+        uses: actions/checkout@v6
+      - name: Checkout LuaJIT fork
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LUAJIT_REPO }}
+          path: xglua-luajit
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build LuaJIT (ARM64)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit\src"
+          call msvcbuild.bat dll
+          if not exist lua_shared.dll exit /b 1
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit"
+          if not exist dist\arm64 mkdir dist\arm64
+          copy /y src\lua_shared.dll dist\arm64\ >nul
+          copy /y src\lua_shared.lib dist\arm64\ >nul
+      - name: Upload lua_shared (windows-arm64)
+        uses: actions/upload-artifact@v5
+        with:
+          name: lua_shared-windows-arm64
+          path: xglua-luajit/dist/arm64/
+      - name: Build hlsdk server (ARM64)
+        shell: pwsh
+        run: |
+          cmake -B build -A ARM64 -DBUILD_CLIENT=OFF `
+            -DXGLUA_LUAJIT_DIR="$env:GITHUB_WORKSPACE/xglua-luajit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload server (windows-arm64)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xglua-server-windows-arm64
+          path: |
+            build/dlls/Release/*.dll
+            lua/
+            gamemodes/
+            cfg/
+
+  windows-x64:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout hlsdk
+        uses: actions/checkout@v6
+      - name: Checkout LuaJIT fork
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LUAJIT_REPO }}
+          path: xglua-luajit
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build LuaJIT (x64)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit\src"
+          call msvcbuild.bat dll
+          if not exist lua_shared.dll exit /b 1
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit"
+          if not exist dist\amd64 mkdir dist\amd64
+          copy /y src\lua_shared.dll dist\amd64\ >nul
+          copy /y src\lua_shared.lib dist\amd64\ >nul
+      - name: Upload lua_shared (windows-x64)
+        uses: actions/upload-artifact@v5
+        with:
+          name: lua_shared-windows-x64
+          path: xglua-luajit/dist/amd64/
+      - name: Build hlsdk server (x64)
+        shell: cmd
+        run: |
+          cmake -B build -A x64 -DBUILD_CLIENT=OFF -D64BIT=ON -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
+          cmake --build build --config Release --target server
+      - name: Upload server (windows-x64)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xglua-server-windows-x64
+          path: |
+            build/dlls/Release/*.dll
+            lua/
+            gamemodes/
+            cfg/
+
+  windows-x86:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout hlsdk
+        uses: actions/checkout@v6
+      - name: Checkout LuaJIT fork
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LUAJIT_REPO }}
+          path: xglua-luajit
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build LuaJIT (x86)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" x86
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit\src"
+          call msvcbuild.bat dll
+          if not exist lua_shared.dll exit /b 1
+          cd /d "%GITHUB_WORKSPACE%\xglua-luajit"
+          if not exist dist mkdir dist
+          copy /y src\lua_shared.dll dist\ >nul
+          copy /y src\lua_shared.lib dist\ >nul
+      - name: Upload lua_shared (windows-x86)
+        uses: actions/upload-artifact@v5
+        with:
+          name: lua_shared-windows-x86
+          path: xglua-luajit/dist/
+      - name: Build hlsdk server (x86)
+        shell: cmd
+        run: |
+          rem x86 Windows BUILDARCH is empty in LibraryNaming: artifacts go to
+          rem dist\ root, which the CMake lookup above already matches.
+          cmake -B build -A Win32 -DBUILD_CLIENT=OFF -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
+          cmake --build build --config Release --target server
+      - name: Upload server (windows-x86)
+        uses: actions/upload-artifact@v5
+        with:
+          name: xglua-server-windows-x86
+          path: |
+            build/dlls/Release/*.dll
+            lua/
+            gamemodes/
+            cfg/
+
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [ amd64, i386 ]
+    steps:
+      - name: Checkout hlsdk
+        uses: actions/checkout@v6
+      - name: Checkout LuaJIT fork
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LUAJIT_REPO }}
+          path: xglua-luajit
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install multilib (i386)
+        if: matrix.arch == 'i386'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - name: Build LuaJIT static archive
+        run: |
+          cd xglua-luajit/src
+          if [ "${{ matrix.arch }}" = "i386" ]; then
+            # host tools stay 64-bit, only the LuaJIT target is 32-bit
+            make -j2 HOST_CC="gcc -m32 -O2" CC="gcc -m32 -fPIC -O2"
+          else
+            # -fPIC is required: the static archive is linked into the
+            # shared hl library (LuaJIT's default static objects are non-PIC)
+            make -j2 CC="gcc -fPIC -O2"
+          fi
+          cd ..
+          mkdir -p dist/${{ matrix.arch }}
+          cp src/libluajit.a dist/${{ matrix.arch }}/liblua_shared.a
+      - name: Upload lua_shared (linux-${{ matrix.arch }})
+        uses: actions/upload-artifact@v5
+        with:
+          name: lua_shared-linux-${{ matrix.arch }}
+          path: xglua-luajit/dist/${{ matrix.arch }}/
+      - name: Build hlsdk server
+        run: |
+          cmake -B build -DBUILD_CLIENT=OFF \
+            -D64BIT=${{ matrix.arch == 'amd64' && 'ON' || 'OFF' }} \
+            -DXGLUA_LUAJIT_DIR="$GITHUB_WORKSPACE/xglua-luajit"
+          cmake --build build --target server --parallel 2
+      - name: Upload server (linux-${{ matrix.arch }})
+        uses: actions/upload-artifact@v5
+        with:
+          name: xglua-server-linux-${{ matrix.arch }}
+          path: build/dlls/*.so
+
+  android:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - abi: arm64-v8a
+            luajit_arch: arm64
+            triple: aarch64-linux-android21
+            host_cc: gcc -m64
+          - abi: armeabi-v7a
+            luajit_arch: armv7
+            triple: armv7a-linux-androideabi21
+            host_cc: gcc -m32
+    env:
+      ANDROID_NDK_VERSION: 29.0.14206865
+    steps:
+      - name: Checkout hlsdk
+        uses: actions/checkout@v6
+      - name: Checkout LuaJIT fork
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LUAJIT_REPO }}
+          path: xglua-luajit
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install 32-bit host gcc (armeabi-v7a only)
+        if: matrix.abi == 'armeabi-v7a'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - name: Install Android NDK
+        run: |
+          wget -q "$NDK_ZIP"
+          unzip -q android-ndk-r29-linux.zip
+          echo "NDK=$GITHUB_WORKSPACE/android-ndk-r29" >> $GITHUB_ENV
+      - name: Build LuaJIT static archive (${{ matrix.abi }})
+        run: |
+          NDKB="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # LuaJIT with the NDK unified toolchain: STATIC_CC builds the
+          # archive we ship, DYNAMIC_CC only feeds the optional .so target.
+          # TARGET_SYS=Linux is correct for Android (Bionic).
+          cd xglua-luajit/src
+          make -j2 HOST_CC="${{ matrix.host_cc }} -O2" \
+            STATIC_CC="$NDKB/${{ matrix.triple }}-clang -fPIC" \
+            DYNAMIC_CC="$NDKB/${{ matrix.triple }}-clang -fPIC" \
+            TARGET_LD="$NDKB/${{ matrix.triple }}-clang" \
+            TARGET_AR="$NDKB/llvm-ar rcus" \
+            TARGET_STRIP="$NDKB/llvm-strip" \
+            TARGET_SYS=Linux
+          cd ..
+          # LibraryNaming builds armv7hf/armv7l (hard/soft float), never
+          # bare "armv7" - provide both so the CMake BUILDARCH lookup
+          # always finds dist/<BUILDARCH>/liblua_shared.a
+          if [ "${{ matrix.luajit_arch }}" = "armv7" ]; then
+            for d in armv7l armv7hf; do mkdir -p dist/$d; cp src/libluajit.a dist/$d/liblua_shared.a; done
+          else
+            mkdir -p dist/${{ matrix.luajit_arch }}
+            cp src/libluajit.a dist/${{ matrix.luajit_arch }}/liblua_shared.a
+          fi
+      - name: Upload lua_shared (android-${{ matrix.luajit_arch }})
+        uses: actions/upload-artifact@v5
+        with:
+          name: lua_shared-android-${{ matrix.luajit_arch }}
+          path: xglua-luajit/dist/
+      - name: Build hlsdk server (${{ matrix.abi }})
+        run: |
+          cmake -B build \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_ANDROID_NDK="$NDK" \
+            -DCMAKE_ANDROID_ARCH_ABI=${{ matrix.abi }} \
+            -DCMAKE_SYSTEM_VERSION=21 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
+            -DBUILD_CLIENT=OFF \
+            -DXGLUA_LUAJIT_DIR="$GITHUB_WORKSPACE/xglua-luajit"
+          cmake --build build --target server --parallel 2
+      - name: Upload server (android-${{ matrix.abi }})
+        uses: actions/upload-artifact@v5
+        with:
+          name: xglua-server-android-${{ matrix.abi }}
+          path: build/dlls/*.so

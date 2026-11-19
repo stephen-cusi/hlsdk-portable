@@ -51,6 +51,20 @@ XGLuaSayResult XGLua_PlayerSay( CBasePlayer *pPlayer, const char *text, int team
 BOOL XGLua_PlayerCanPickupWeapon( CBasePlayer *pPlayer, CBaseEntity *pWeapon ); // CBasePlayerItem::AddToPlayer entry
 BOOL XGLua_PlayerCanPickupItem( CBasePlayer *pPlayer, CBaseEntity *pItem );     // CItem::ItemTouch before MyTouch
 
+// Damage / use events (xglua_damage.cpp; call graph in its header comment)
+BOOL XGLua_PlayerUse( CBasePlayer *pPlayer, CBaseEntity *pTarget );                // PlayerUse: strict false blocks this interaction
+BOOL XGLua_PlayerShouldTakeDamage( CBasePlayer *pPlayer, entvars_t *pevInflictor, entvars_t *pevAttacker ); // strict false exempts the player this hit
+int XGLua_EntityTakeDamage( CBaseEntity *victim, entvars_t *pevInflictor, entvars_t *pevAttacker, float *pflDamage, int *pbitsType ); // 1 = cancel, 0 = continue (values may be modified)
+
+//
+// Scripted Entities (SENT - xglua_sent.cpp)
+//
+CBaseEntity *XGLua_SpawnLuaEntity( const char *classname, const Vector &origin );
+BOOL XGLua_IsLuaEntity( const char *classname );
+void XGLua_GetSENTRegistry( lua_State *L );
+void XGLua_BuildEntityCache( lua_State *L );
+void XGLua_ClearEntityCache( void );
+
 //
 // Script loading / dispatch
 //
@@ -66,6 +80,7 @@ void XGLua_ReportError( lua_State *L, const char *context );
 void XGLua_EntityFrame( lua_State *L );                        // bounded entity cache cleanup
 void XGLua_PushEntity( lua_State *L, edict_t *pent );         // entity handle userdata
 edict_t *XGLua_CheckEntity( lua_State *L, int idx );          // throws if not entity
+edict_t *XGLua_TryEntity( lua_State *L, int idx );            // returns NULL if not a valid entity
 void XGLua_RegisterEntityLibs( lua_State *L );                // ents/player/util/Entity metatable
 
 //

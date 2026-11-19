@@ -17,6 +17,7 @@
 //=========================================================
 #include	"extdll.h"
 #include	"util.h"
+#include	"lua/xglua.h"
 #include	"cbase.h"
 #include	"monsters.h"
 #include	"schedule.h"
@@ -207,6 +208,13 @@ void CGMan::RunTask( Task_t *pTask )
 //=========================================================
 int CGMan::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	float xglDamage = flDamage;
+	int xglType = bitsDamageType;
+	if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+		return 0;
+	flDamage = xglDamage;
+	bitsDamageType = xglType;
+
 	pev->health = pev->max_health / 2; // always trigger the 50% damage aitrigger
 
 	if( flDamage > 0 )

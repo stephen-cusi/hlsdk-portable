@@ -26,6 +26,7 @@
 
 #include "extdll.h"
 #include "util.h"
+#include "lua/xglua.h"	// XGLua
 #include "cbase.h"
 #include "monsters.h"
 #include "weapons.h"
@@ -1005,6 +1006,19 @@ int CBaseTurret::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 	if( !pev->takedamage )
 		return 0;
 
+	// XGLua: EntityTakeDamage gate - strict true cancels, otherwise the
+	// (possibly modified) damage/type continue into the native body. Kept
+	// after the takedamage check so invulnerable/dead turrets (DAMAGE_NO)
+	// never dispatch, matching every other override.
+	{
+		float xglDamage = flDamage;
+		int xglType = bitsDamageType;
+		if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+			return 0;
+		flDamage = xglDamage;
+		bitsDamageType = xglType;
+	}
+
 	if( !m_iOn )
 		flDamage *= 0.1f;
 
@@ -1199,6 +1213,12 @@ int CSentry::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float 
 {
 	if( !pev->takedamage )
 		return 0;
+	float xglDamage = flDamage;
+	int xglType = bitsDamageType;
+	if( XGLua_EntityTakeDamage( this, pevInflictor, pevAttacker, &xglDamage, &xglType ) )
+		return 0;
+	flDamage = xglDamage;
+	bitsDamageType = xglType;
 
 	if( !m_iOn )
 	{
