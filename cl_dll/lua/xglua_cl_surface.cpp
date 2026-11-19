@@ -4,9 +4,9 @@
 *
 ****/
 
+#include "lua/xglua_cl.h" // must precede cl_util.h (macro hygiene)
 #include "hud.h"
 #include "cl_util.h"
-#include "lua/xglua_cl.h"
 extern "C" {
 #include "lauxlib.h"
 }

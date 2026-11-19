@@ -12,12 +12,19 @@
 #include <cstdlib>
 #include <ctime>
 #include <string>
+#include <vector>
+#include <utility>
 
 #include "hud.h"
 #include "cl_util.h"
 #include "lua/xglua_cl.h"
 #include "lua/xglua_safe.h"
 #include "lua/xglua_hook.h"
+// engine's cdll_int.h typedefs HSPRITE as int; the Windows SDK (minwindef.h)
+// redefines it as struct HSPRITE__ * - rename it away for this TU only.
+#define HSPRITE XGLUA_WIN_HSPRITE
+#include <windows.h> // FindFirstFileA for autorun scan
+#undef HSPRITE
 #include "lua/xglua_vm_timer.h"
 extern "C" {
 #include "lualib.h"
@@ -38,6 +45,47 @@ void XGLua_CL_ReportError( lua_State *L, const char *context )
 	lua_pop( L, 1 );
 }
 
+static std::vector<std::pair<std::string, std::string> > g_CLMemVFS;
+
+void XGLua_CL_MemVFSStore( const char *relpath, const char *data, size_t len )
+{
+	if( !relpath || !relpath[0] ) return;
+	std::string key = relpath;
+	for( size_t i = 0; i < key.size(); ++i )
+		if( key[i] == '\\' ) key[i] = '/';
+	for( size_t i = 0; i < g_CLMemVFS.size(); ++i )
+	{
+		if( g_CLMemVFS[i].first == key )
+		{
+			g_CLMemVFS[i].second.assign( data ? data : "", len );
+			return;
+		}
+	}
+	g_CLMemVFS.push_back( std::make_pair( key, std::string( data ? data : "", len ) ) );
+}
+
+bool XGLua_CL_MemVFSFind( const char *relpath, std::string &out )
+{
+	if( !relpath || !relpath[0] ) return false;
+	std::string key = relpath;
+	for( size_t i = 0; i < key.size(); ++i )
+		if( key[i] == '\\' ) key[i] = '/';
+	for( size_t i = 0; i < g_CLMemVFS.size(); ++i )
+	{
+		if( g_CLMemVFS[i].first == key )
+		{
+			out = g_CLMemVFS[i].second;
+			return true;
+		}
+	}
+	return false;
+}
+
+void XGLua_CL_MemVFSClear( void )
+{
+	g_CLMemVFS.clear();
+}
+
 static bool CL_LoadFileViaEngine( const char *relpath, std::string &out )
 {
 	if( !relpath || !relpath[0] || !gEngfuncs.COM_LoadFile || !gEngfuncs.COM_FreeFile )
@@ -47,8 +95,11 @@ static bool CL_LoadFileViaEngine( const char *relpath, std::string &out )
 	if( relpath[0] == '/' || relpath[0] == '\\' || std::strstr( relpath, ".." ) != NULL )
 		return false;
 
-	char full[512];
-	snprintf( full, sizeof( full ), "lua/%s", relpath );
+	if( XGLua_CL_MemVFSFind( relpath, out ) )
+		return true;
+
+	char full[512];
+	snprintf( full, sizeof( full ), "lua/%s", relpath );
 	int length = 0;
 	byte *data = gEngfuncs.COM_LoadFile( full, 5, &length );
 	if( !data || length < 0 )
@@ -81,6 +132,34 @@ static bool CL_RunScriptFile( lua_State *L, const char *relpath )
 }
 
 //===========================================================================
+// Client autorun scan (lua/autorun and lua/autorun/client)
+
+static void CL_LoadAutorunFolder( lua_State *L, const char *relfolder )
+{
+#ifdef _WIN32
+	const char *gamedir = gEngfuncs.pfnGetGameDirectory ? gEngfuncs.pfnGetGameDirectory() : NULL;
+	if( !gamedir || !gamedir[0] ) return;
+	char mask[512];
+	snprintf( mask, sizeof( mask ), "%s/lua/%s/*.lua", gamedir, relfolder );
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA( mask, &fd );
+	if( h == INVALID_HANDLE_VALUE ) return;
+	do
+	{
+		if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) continue;
+		char rel[512];
+		snprintf( rel, sizeof( rel ), "%s/%s", relfolder, fd.cFileName );
+		CL_RunScriptFile( L, rel );
+	} while( FindNextFileA( h, &fd ) );
+	FindClose( h );
+#else
+	(void)L; (void)relfolder;
+#endif
+}
+
+//
+
+
 // Base client globals
 //===========================================================================
 
@@ -146,6 +225,12 @@ static int CL_Color( lua_State *L )
 	lua_pushinteger( L, b ); lua_setfield( L, -2, "b" );
 	lua_pushinteger( L, a ); lua_setfield( L, -2, "a" );
 	return 1;
+}
+
+static int CL_AddCSLuaFile( lua_State *L )
+{
+	( void )L;
+	return 0;
 }
 
 static int CL_include( lua_State *L )
@@ -277,6 +362,9 @@ void XGLua_CL_Startup( void )
 		XGLua_CL_Shutdown();
 		return;
 	}
+
+	CL_LoadAutorunFolder( L, "autorun" );
+	CL_LoadAutorunFolder( L, "autorun/client" );
 
 	XGLua_HookRunProtected( L, "Initialize", NULL, NULL, XGLua_CL_ReportError );
 	ConsolePrint( "[XGLua CL] client VM ready\n" );

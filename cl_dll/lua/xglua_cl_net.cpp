@@ -255,6 +255,7 @@ static void HandleStringTableSync( const std::vector<uint8_t> &payload )
 	if( r.underflow || count > 65535 )
 		return;
 	g_CLNetStrings.clear();
+	XGLua_CL_MemVFSClear();
 	for( uint32_t i = 0; i < count; ++i )
 	{
 		uint32_t id = r.ReadUInt( 16 );
@@ -265,6 +266,27 @@ static void HandleStringTableSync( const std::vector<uint8_t> &payload )
 			g_CLNetStrings.resize( id );
 		g_CLNetStrings[id - 1] = CLNetNormalize( name );
 	}
+}
+
+static void HandleCSLuaFile( const std::vector<uint8_t> &payload )
+{
+	if( CVAR_GET_FLOAT( "xgl_cl_allowdownload" ) == 0.0f )
+		return;
+	XGLuaNetReader r;
+	r.Init( payload.data(), payload.size() );
+	char path[256] = { 0 };
+	if( !r.ReadString( path, sizeof( path ) ) || !path[0] )
+		return;
+	if( path[0] == '/' || path[0] == '\\' || std::strstr( path, ".." ) != NULL || std::strchr( path, ':' ) != NULL )
+		return;
+	uint32_t fileLen = r.ReadUInt( 16 );
+	if( r.underflow || fileLen > XGLUA_NET_MAX_BYTES )
+		return;
+	std::string content;
+	content.resize( fileLen );
+	if( fileLen > 0 && !r.ReadBytes( (uint8_t *)&content[0], fileLen ) )
+		return;
+	XGLua_CL_MemVFSStore( path, content.data(), content.size() );
 }
 
 static int __MsgFunc_XGLNet( const char *pszName, int iSize, void *pbuf )
@@ -288,6 +310,12 @@ static int __MsgFunc_XGLNet( const char *pszName, int iSize, void *pbuf )
 		return 1;
 	}
 
+	if( hdr.flags & XGLUA_NET_FLAG_CSLUA )
+	{
+		HandleCSLuaFile( full );
+		return 1;
+	}
+
 	if( !g_xglua_cl_L || hdr.msgId == 0 || hdr.msgId > g_CLNetStrings.size() )
 		return 1;
 
@@ -305,6 +333,7 @@ static int __MsgFunc_XGLNet( const char *pszName, int iSize, void *pbuf )
 
 void XGLua_CL_NetHookMessages( void )
 {
+	CVAR_CREATE( "xgl_cl_allowdownload", "1", FCVAR_ARCHIVE );
 	gEngfuncs.pfnHookUserMsg( "XGLNet", __MsgFunc_XGLNet );
 }
 

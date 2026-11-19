@@ -41,6 +41,55 @@ static cvar_t xgl_net_rate_limit  = { "xgl_net_rate_limit", "60" };
 
 static std::vector<std::string> g_NetStrings;
 
+#define XGLUA_CSLUA_MAX_FILE_BYTES 36864 // 36 KB per file (< XGLUA_NET_MAX_BYTES)
+static std::vector<std::string> g_CSLuaFiles;
+
+static bool NetNormalizeCSLuaPath( const char *raw, std::string &out )
+{
+	if( !raw || !raw[0] ) return false;
+	std::string s = raw;
+	for( size_t i = 0; i < s.size(); ++i )
+		if( s[i] == '\\' ) s[i] = '/';
+	// Strip leading "@lua/" or "lua/" if derived from lua_Debug::source
+	if( s.compare( 0, 5, "@lua/" ) == 0 ) s.erase( 0, 5 );
+	else if( s.compare( 0, 4, "lua/" ) == 0 ) s.erase( 0, 4 );
+	else if( !s.empty() && s[0] == '@' ) s.erase( 0, 1 );
+
+	if( s.empty() || s[0] == '/' || s.find( ".." ) != std::string::npos || s.find( ':' ) != std::string::npos )
+		return false;
+	out = s;
+	return true;
+}
+
+static void NetAddCSLuaPath( const std::string &rel )
+{
+	for( size_t i = 0; i < g_CSLuaFiles.size(); ++i )
+		if( g_CSLuaFiles[i] == rel ) return;
+	g_CSLuaFiles.push_back( rel );
+}
+
+static int global_AddCSLuaFile( lua_State *L )
+{
+	const char *arg = luaL_optstring( L, 1, NULL );
+	std::string rel;
+	if( arg && arg[0] )
+	{
+		if( !NetNormalizeCSLuaPath( arg, rel ) )
+			return luaL_argerror( L, 1, "invalid AddCSLuaFile path" );
+	}
+	else
+	{
+		lua_Debug ar;
+		if( !lua_getstack( L, 1, &ar ) || !lua_getinfo( L, "S", &ar ) || !ar.source )
+			return 0;
+		if( !NetNormalizeCSLuaPath( ar.source, rel ) )
+			return 0;
+	}
+	NetAddCSLuaPath( rel );
+	return 0;
+}
+
+
 static std::string NetNormalizeName( const char *name )
 {
 	std::string s;
@@ -170,6 +219,42 @@ static void NetSyncStringTableToClient( int clientIdx )
 	}
 	if( !w.overflow )
 		NetEnqueueMessage( clientIdx, XGLUA_NET_FLAG_STRTBL, 0, scratch, w.BytesWritten() );
+}
+
+static void NetSyncCSLuaFilesToClient( int clientIdx )
+{
+	if( g_CSLuaFiles.empty() || !g_engfuncs.pfnLoadFileForMe || !g_engfuncs.pfnFreeFile )
+		return;
+
+	static uint8_t scratch[XGLUA_NET_MAX_BYTES];
+	for( size_t i = 0; i < g_CSLuaFiles.size(); ++i )
+	{
+		char full[512];
+		snprintf( full, sizeof( full ), "lua/%s", g_CSLuaFiles[i].c_str() );
+		int fileLen = 0;
+		byte *data = LOAD_FILE_FOR_ME( full, &fileLen );
+		if( !data )
+		{
+			ALERT( at_console, "[XGLua] AddCSLuaFile: missing '%s'\n", full );
+			continue;
+		}
+		if( fileLen >= 0 && fileLen <= XGLUA_CSLUA_MAX_FILE_BYTES )
+		{
+			XGLuaNetWriter w;
+			w.Init( scratch, sizeof( scratch ) );
+			w.WriteString( g_CSLuaFiles[i].c_str() );
+			w.WriteUInt( (uint32_t)fileLen, 16 );
+			w.WriteBytes( (const uint8_t *)data, (size_t)fileLen );
+			if( !w.overflow )
+				NetEnqueueMessage( clientIdx, XGLUA_NET_FLAG_CSLUA, 0, scratch, w.BytesWritten() );
+		}
+		else
+		{
+			ALERT( at_console, "[XGLua] AddCSLuaFile: '%s' exceeds %d bytes, skipped\n",
+				full, XGLUA_CSLUA_MAX_FILE_BYTES );
+		}
+		FREE_FILE( data );
+	}
 }
 
 //===========================================================================
@@ -587,6 +672,9 @@ void XGLua_RegisterNetLibs( lua_State *L )
 		lua_setfield( L, -2, f->name );
 	}
 	lua_setglobal( L, "net" );
+
+	lua_pushcfunction( L, global_AddCSLuaFile );
+	lua_setglobal( L, "AddCSLuaFile" );
 }
 
 void XGLua_NetFrame( lua_State *L )
@@ -640,6 +728,7 @@ void XGLua_NetClientPutInServer( CBasePlayer *pPlayer )
 	g_NetClients[idx].Reset( now );
 	g_NetClients[idx].connected = true;
 	NetSyncStringTableToClient( idx );
+	NetSyncCSLuaFilesToClient( idx );
 }
 
 void XGLua_NetClientDisconnect( CBasePlayer *pPlayer )
@@ -726,6 +815,7 @@ void XGLua_NetShutdown( void )
 	g_NetWriting = false;
 	g_NetReading = false;
 	g_NetStrings.clear();
+	g_CSLuaFiles.clear();
 	for( int i = 0; i <= XGLUA_MAX_CLIENTS; ++i )
 		g_NetClients[i].Reset( 0.0 );
 }
