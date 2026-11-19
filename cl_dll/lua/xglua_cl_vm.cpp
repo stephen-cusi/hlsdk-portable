@@ -17,6 +17,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "lua/xglua_dev.h"
 #include "lua/xglua_cl.h"
 #include "lua/xglua_safe.h"
 #include "lua/xglua_hook.h"
@@ -163,6 +164,58 @@ static void CL_LoadAutorunFolder( lua_State *L, const char *relfolder )
 // Base client globals
 //===========================================================================
 
+static void XGLua_CLEmitLine( const char *line )
+{
+	char buf[600];
+	snprintf( buf, sizeof( buf ), "%s\n", line );
+	ConsolePrint( buf );
+}
+
+static void XGLua_CL_Mem_f( void )
+{
+	if( !g_xglua_cl_L ) { ConsolePrint( "[XGLua CL] no client Lua VM running\n" ); return; }
+	char stats[128], buf[192];
+	if( XGLua_DevMemStats( g_xglua_cl_L, stats, sizeof( stats ) ) )
+	{
+		snprintf( buf, sizeof( buf ), "[XGLua CL] client VM memory: %s\n", stats );
+		ConsolePrint( buf );
+	}
+}
+
+static void XGLua_CL_DumpHooks_f( void )
+{
+	if( !g_xglua_cl_L ) { ConsolePrint( "[XGLua CL] no client Lua VM running\n" ); return; }
+	ConsolePrint( "[XGLua CL] client hooks:\n" );
+	XGLua_DevDumpHooks( g_xglua_cl_L, XGLua_CLEmitLine, XGLua_CL_ReportError, "XGLua CL" );
+}
+
+static void XGLua_CL_Refresh_f( void )
+{
+	if( !g_xglua_cl_L ) { ConsolePrint( "[XGLua CL] no client Lua VM running\n" ); return; }
+	if( gEngfuncs.Cmd_Argc() < 2 )
+	{
+		ConsolePrint( "usage: xgl_refresh_cl <path relative to lua/>\n" );
+		return;
+	}
+	const char *path = gEngfuncs.Cmd_Argv( 1 );
+	if( !CL_RunScriptFile( g_xglua_cl_L, path ) )
+	{
+		ConsolePrint( "[XGLua CL] xgl_refresh_cl: failed\n" );
+		return;
+	}
+	XGLua_DevTriggerReloaded( g_xglua_cl_L, XGLua_CL_ReportError );
+	ConsolePrint( "[XGLua CL] xgl_refresh_cl: reloaded\n" );
+}
+
+static void XGLua_CL_Reload_f( void )
+{
+	if( !g_xglua_cl_L ) { ConsolePrint( "[XGLua CL] no client Lua VM running\n" ); return; }
+	CL_LoadAutorunFolder( g_xglua_cl_L, "autorun" );
+	CL_LoadAutorunFolder( g_xglua_cl_L, "autorun/client" );
+	XGLua_DevTriggerReloaded( g_xglua_cl_L, XGLua_CL_ReportError );
+	ConsolePrint( "[XGLua CL] xgl_reload_cl: autorun scripts reloaded\n" );
+}
+
 static int CL_print( lua_State *L )
 {
 	int n = lua_gettop( L );
@@ -305,6 +358,10 @@ static void XGLua_CL_LuaRun_f( void )
 void XGLua_CL_Init( void )
 {
 	gEngfuncs.pfnAddCommand( "lua_run_cl", XGLua_CL_LuaRun_f );
+	gEngfuncs.pfnAddCommand( "xgl_mem_cl", XGLua_CL_Mem_f );
+	gEngfuncs.pfnAddCommand( "xgl_dump_hooks_cl", XGLua_CL_DumpHooks_f );
+	gEngfuncs.pfnAddCommand( "xgl_refresh_cl", XGLua_CL_Refresh_f );
+	gEngfuncs.pfnAddCommand( "xgl_reload_cl", XGLua_CL_Reload_f );
 	XGLua_CL_NetHookMessages();
 }
 

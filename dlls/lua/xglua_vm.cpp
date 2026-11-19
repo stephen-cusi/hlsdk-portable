@@ -18,6 +18,7 @@
 #include "xglua_safe.h"
 #include "xglua_hook.h"
 #include "xglua_vm_timer.h"
+#include "lua/xglua_dev.h"
 #include "player.h"
 extern "C" {
 #include "lualib.h"
@@ -367,6 +368,69 @@ static void XGLua_LuaRun_f( void )
 // the stack restored and name the script. Repeated runs and failures leave
 // the VM usable. No permission gating exists - like lua_run this is a
 // trusted-server command.
+static void XGLua_SVEmitLine( const char *line )
+{
+	ALERT( at_console, "%s\n", line );
+}
+
+static void XGLua_Mem_f( void )
+{
+	if( !g_xglua_L )
+	{
+		ALERT( at_console, "[XGLua] no Lua VM running\n" );
+		return;
+	}
+	char buf[128];
+	if( XGLua_DevMemStats( g_xglua_L, buf, sizeof( buf ) ) )
+		ALERT( at_console, "[XGLua] server VM memory: %s\n", buf );
+}
+
+static void XGLua_DumpHooks_f( void )
+{
+	if( !g_xglua_L )
+	{
+		ALERT( at_console, "[XGLua] no Lua VM running\n" );
+		return;
+	}
+	ALERT( at_console, "[XGLua] server hooks:\n" );
+	XGLua_DevDumpHooks( g_xglua_L, XGLua_SVEmitLine, XGLua_ReportError, "XGLua" );
+}
+
+static void XGLua_Refresh_f( void )
+{
+	if( !g_xglua_L )
+	{
+		ALERT( at_console, "[XGLua] no Lua VM running\n" );
+		return;
+	}
+	if( CMD_ARGC() < 2 )
+	{
+		ALERT( at_console, "usage: xgl_refresh <path relative to lua/>\n" );
+		return;
+	}
+	const char *path = CMD_ARGV( 1 );
+	if( !XGLua_LoadScriptChecked( g_xglua_L, path ) )
+	{
+		ALERT( at_console, "[XGLua] xgl_refresh: failed: %s\n", path );
+		return;
+	}
+	XGLua_DevTriggerReloaded( g_xglua_L, XGLua_ReportError );
+	ALERT( at_console, "[XGLua] xgl_refresh: reloaded %s\n", path );
+}
+
+static void XGLua_Reload_f( void )
+{
+	if( !g_xglua_L )
+	{
+		ALERT( at_console, "[XGLua] no Lua VM running\n" );
+		return;
+	}
+	XGLua_LoadFolder( g_xglua_L, "autorun", false );
+	XGLua_LoadFolder( g_xglua_L, "autorun/server", true );
+	XGLua_DevTriggerReloaded( g_xglua_L, XGLua_ReportError );
+	ALERT( at_console, "[XGLua] xgl_reload: autorun scripts reloaded\n" );
+}
+
 static void XGLua_LuaOpenScript_f( void )
 {
 	if( !g_xglua_L )
@@ -450,6 +514,10 @@ void XGLua_Init( void )
 {
 	g_engfuncs.pfnAddServerCommand( "lua_run", XGLua_LuaRun_f );
 	g_engfuncs.pfnAddServerCommand( "lua_openscript", XGLua_LuaOpenScript_f );
+	g_engfuncs.pfnAddServerCommand( "xgl_mem", XGLua_Mem_f );
+	g_engfuncs.pfnAddServerCommand( "xgl_dump_hooks", XGLua_DumpHooks_f );
+	g_engfuncs.pfnAddServerCommand( "xgl_refresh", XGLua_Refresh_f );
+	g_engfuncs.pfnAddServerCommand( "xgl_reload", XGLua_Reload_f );
 	g_engfuncs.pfnAddServerCommand( "lua_cmd", XGLua_LuaCmd_f );
 	CVAR_REGISTER( &xgl_gamemode );
 	XGLua_NetInit();
