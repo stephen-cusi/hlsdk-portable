@@ -287,6 +287,8 @@ void CLuaEntity::Spawn( void )
 	if( info->model[0] )
 		SET_MODEL( ENT( pev ), info->model );
 
+	XGLua_CallSENTMethod( g_xglua_L, m_szLuaClass, "SetupDataTables",
+		XGLua_PushSelfEnt, this, XGLua_ReportError, "ENT:SetupDataTables" );
 	XGLua_CallSENTMethod( g_xglua_L, m_szLuaClass, "Initialize",
 		XGLua_PushSelfEnt, this, XGLua_ReportError, "ENT:Initialize" );
 

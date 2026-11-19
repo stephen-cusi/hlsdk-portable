@@ -606,6 +606,10 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		lua_pushcfunction( L, f->func );
 		lua_setfield( L, -2, f->name );
 	}
+	// expose the real entity metatable as META_ENT so pure-Lua extensions
+	// (nwvar.lua etc.) attach directly to entity userdata
+	lua_pushvalue( L, -1 );
+	lua_setglobal( L, "META_ENT" );
 	lua_pop( L, 1 );
 
 	// ents library
