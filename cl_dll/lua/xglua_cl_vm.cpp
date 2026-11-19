@@ -18,6 +18,7 @@
 #include "hud.h"
 #include "cl_util.h"
 #include "lua/xglua_dev.h"
+#include "lua/xglua_cl_predict.h"
 #include "lua/xglua_cl.h"
 #include "lua/xglua_safe.h"
 #include "lua/xglua_hook.h"
@@ -412,6 +413,7 @@ void XGLua_CL_Startup( void )
 
 	XGLua_CL_RegisterSurface( L );
 	XGLua_CL_RegisterNet( L );
+	XGLua_CL_RegisterPredictLibs( L );
 
 	if( !CL_RunScriptFile( L, "includes/init.lua" ) )
 	{

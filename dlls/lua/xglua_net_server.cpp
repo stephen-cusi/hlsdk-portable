@@ -22,6 +22,9 @@
 #include "lua/xglua_netcodec.h"
 #include "lua/xglua_netfrag.h"
 #include "lua/xglua_nwvar.h"
+#include "lua/xglua_cl_swep_meta.h"
+
+const XGLuaCLSWEPRegistry &XGLua_GetServerSWEPMeta( void );
 #include "player.h"
 extern "C" {
 #include "lauxlib.h"
@@ -211,6 +214,18 @@ void XGLua_NWClearEntity( int entIndex )
 {
 	if( entIndex >= 0 && entIndex <= 65535 )
 		g_NWStore.ClearEntity( (uint16_t)entIndex, true );
+}
+
+static void NetSyncSWEPMetaToClient( int clientIdx )
+{
+	const XGLuaCLSWEPRegistry &reg = XGLua_GetServerSWEPMeta();
+	if( reg.items.empty() )
+		return;
+	static uint8_t scratch[XGLUA_NET_MAX_BYTES];
+	XGLuaNetWriter w;
+	w.Init( scratch, sizeof( scratch ) );
+	if( reg.EncodeAll( w ) )
+		NetEnqueueMessage( clientIdx, XGLUA_NET_FLAG_SWEPLIST, 0, scratch, w.BytesWritten() );
 }
 
 static void NetSyncNWVarsToClient( int clientIdx )
@@ -870,6 +885,7 @@ void XGLua_NetClientPutInServer( CBasePlayer *pPlayer )
 	NetSyncStringTableToClient( idx );
 	NetSyncCSLuaFilesToClient( idx );
 	NetSyncNWVarsToClient( idx );
+	NetSyncSWEPMetaToClient( idx );
 }
 
 void XGLua_NetClientDisconnect( CBasePlayer *pPlayer )

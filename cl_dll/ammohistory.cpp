@@ -18,6 +18,7 @@
 
 
 #include "hud.h"
+#include "lua/xglua_cl.h"
 #include "cl_util.h"
 #include "parsemsg.h"
 
@@ -147,23 +148,34 @@ int HistoryResource::DrawAmmoHistory( float flTime )
 			else if( rgAmmoHistory[i].type == HISTSLOT_WEAP )
 			{
 				WEAPON *weap = gWR.GetWeapon( rgAmmoHistory[i].iId );
+				const XGLuaCLSWEPMeta *luaMeta = XGLua_CL_FindSWEPMetaById( rgAmmoHistory[i].iId );
 
-				if( !weap )
-					return 1;  // we don't know about the weapon yet, so don't draw anything
+				if( !weap && !luaMeta )
+					continue;  // unknown weapon: skip without blocking later entries
 
 				int r, g, b;
 				UnpackRGB( r,g,b, RGB_YELLOWISH );
 
-				if( !gWR.HasAmmo( weap ) )
+				if( weap && !gWR.HasAmmo( weap ) )
 					UnpackRGB( r, g, b, RGB_REDISH );	// if the weapon doesn't have ammo, display it as red
 
 				float scale = ( rgAmmoHistory[i].DisplayTime - flTime ) * 80;
 				ScaleColors( r, g, b, Q_min( scale, 255 ) );
 
 				int ypos = ScreenHeight - ( AMMO_PICKUP_PICK_HEIGHT + ( AMMO_PICKUP_GAP * i ) );
-				int xpos = ScreenWidth - ( weap->rcInactive.right - weap->rcInactive.left );
-				SPR_Set( weap->hInactive, r, g, b );
-				SPR_DrawAdditive( 0, xpos, ypos, &weap->rcInactive );
+				if( weap && weap->hInactive )
+				{
+					int xpos = ScreenWidth - ( weap->rcInactive.right - weap->rcInactive.left );
+					SPR_Set( weap->hInactive, r, g, b );
+					SPR_DrawAdditive( 0, xpos, ypos, &weap->rcInactive );
+				}
+				else
+				{
+					const char *label = weap ? weap->szName : luaMeta->classname;
+					int textW = gHUD.DrawHudStringLen( label );
+					int xpos = ScreenWidth - textW - 12;
+					gHUD.DrawHudString( xpos, ypos, ScreenWidth - 4, label, r, g, b );
+				}
 			}
 			else if( rgAmmoHistory[i].type == HISTSLOT_ITEM )
 			{

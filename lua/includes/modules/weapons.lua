@@ -180,3 +180,33 @@ function weapons.GetList()
 	end
 	return list
 end
+
+
+-- Default idle cadence with occasional longidle/fidget insertion (GMod style).
+-- Weapons can override IdleSeq / LongIdleSeq / LongIdleEvery / IdleMinDelay / IdleMaxDelay.
+function WeaponBase:WeaponIdle()
+	if CurTime() < ( self._NextIdleTime or 0 ) then
+		return
+	end
+
+	local idleSeq     = self.IdleSeq or 1
+	local longIdleSeq = self.LongIdleSeq
+	local every       = math.max( 1, math.floor( self.LongIdleEvery or 3 ) )
+	local minDelay    = self.IdleMinDelay or 3.5
+	local maxDelay    = self.IdleMaxDelay or 6.0
+	if maxDelay < minDelay then
+		maxDelay = minDelay
+	end
+
+	self._IdleCount = ( self._IdleCount or 0 ) + 1
+
+	if longIdleSeq and ( self._IdleCount >= every ) then
+		self._IdleCount = 0
+		self:SendWeaponAnim( longIdleSeq )
+		local extra = self.LongIdleExtraDelay or 1.5
+		self._NextIdleTime = CurTime() + minDelay + extra + math.random() * ( maxDelay - minDelay )
+	else
+		self:SendWeaponAnim( idleSeq )
+		self._NextIdleTime = CurTime() + minDelay + math.random() * ( maxDelay - minDelay )
+	end
+end

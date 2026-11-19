@@ -23,6 +23,7 @@
 #define XGLUA_NET_FLAG_STRTBL  0x01
 #define XGLUA_NET_FLAG_CSLUA   0x02
 #define XGLUA_NET_FLAG_NWVAR   0x04
+#define XGLUA_NET_FLAG_SWEPLIST 0x08
 
 struct XGLuaNetFragHeader
 {

@@ -85,10 +85,5 @@ function SWEP:Reload()
 	end
 end
 
-function SWEP:WeaponIdle()
-	if self:GetWeaponIdleTime() > CurTime() then return end
-	self:SendWeaponAnim( self.IdleSeq )
-	self:SetWeaponIdleTime( CurTime() + 4.0 )
-end
 
 weapons.Register( SWEP, "weapon_xgl_carbine" )

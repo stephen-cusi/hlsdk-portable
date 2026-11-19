@@ -3,7 +3,8 @@
 -- Contracts:
 --   1. Explicitly call weapons.Register(SWEP, "<classname>") at the bottom.
 --   2. List every sound used by self:EmitSound(...) in SWEP.PrecacheSounds.
---   3. Sequence numbers are model-specific; verify with xgl_dump_model
+--   3. WeaponIdle alternates idle1/longidle via WeaponBase defaults
+--   4. Sequence numbers are model-specific; verify with xgl_dump_model
 --      <model path> before shipping (v_9mmAR.mdl table below).
 
 SWEP.PrintName      = "XGLua Template Weapon"
@@ -38,9 +39,11 @@ function SWEP:Initialize()
 	self.FireSeq1    = 5
 	self.FireSeq2    = 6
 	self.ReloadSeq   = 3
-	self.ReloadTime  = 1.5
-	self.ReloadSound = "items/clipinsert1.wav"
 	self.IdleSeq     = 1
+	self.LongIdleSeq    = 0
+	self.LongIdleEvery  = 3
+	self.IdleMinDelay   = 3.5
+	self.IdleMaxDelay   = 6.0
 end
 
 function SWEP:PrimaryAttack()
@@ -74,10 +77,5 @@ function SWEP:Reload()
 	end
 end
 
-function SWEP:WeaponIdle()
-	if self:GetWeaponIdleTime() > CurTime() then return end
-	self:SendWeaponAnim( self.IdleSeq )
-	self:SetWeaponIdleTime( CurTime() + 4.0 )
-end
 
 weapons.Register( SWEP, "weapon_xgl_template" )

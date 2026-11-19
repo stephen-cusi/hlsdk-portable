@@ -14,6 +14,8 @@
 ****/
 
 #include "extdll.h"
+#include "lua/xglua_cl.h"
+#include "lua/xglua_cl_predict.h"
 #include "util.h"
 #include "cbase.h"
 #include "monsters.h"
@@ -750,7 +752,25 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 
 	// We are not predicting the current weapon, just bow out here.
 	if( !pWeapon )
+	{
+		// XGLua: dynamic Lua SWEP prediction dispatch (M7 7B).
+		const XGLuaCLSWEPMeta *luaMeta = XGLua_CL_FindSWEPMetaById( from->client.m_iId );
+		if( luaMeta && g_xglua_cl_L )
+		{
+			XGLuaCLPredictScope scope( g_xglua_cl_L, true );
+			int buttons = cmd->buttons;
+			int pressed = buttons & ( ~from->playerstate.oldbuttons );
+			if( ( buttons & IN_ATTACK2 ) && ( luaMeta->secondaryAutomatic || ( pressed & IN_ATTACK2 ) ) )
+				XGLua_CL_CallSWEPMethod( g_xglua_cl_L, luaMeta->classname, "SecondaryAttack" );
+			else if( ( buttons & IN_ATTACK ) && ( luaMeta->primaryAutomatic || ( pressed & IN_ATTACK ) ) )
+				XGLua_CL_CallSWEPMethod( g_xglua_cl_L, luaMeta->classname, "PrimaryAttack" );
+			else if( buttons & IN_RELOAD )
+				XGLua_CL_CallSWEPMethod( g_xglua_cl_L, luaMeta->classname, "Reload" );
+			else if( !( buttons & ( IN_ATTACK | IN_ATTACK2 ) ) )
+				XGLua_CL_CallSWEPMethod( g_xglua_cl_L, luaMeta->classname, "WeaponIdle" );
+		}
 		return;
+	}
 
 	for( i = 0; i < MAX_WEAPONS; i++ )
 	{

@@ -163,7 +163,8 @@ endif()
 list(APPEND CLDLL_SOURCES
 	lua/xglua_cl_vm.cpp
 	lua/xglua_cl_net.cpp
-	lua/xglua_cl_surface.cpp)
+	lua/xglua_cl_surface.cpp
+	lua/xglua_cl_predict.cpp)
 
 include_directories (. hl/ ../dlls ../dlls/wpn_shared ../common ../engine ../pm_shared ../game_shared ../public)
 include_directories(${XGLUA_LUAJIT_DIR}/src)

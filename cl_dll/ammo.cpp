@@ -19,6 +19,8 @@
 //
 
 #include "hud.h"
+#include "lua/xglua_cl.h"
+#include "lua/xglua_cl_swep_meta.h"
 #include "cl_util.h"
 #include "parsemsg.h"
 #include "pm_shared.h"
@@ -91,6 +93,13 @@ void WeaponsResource::LoadWeaponSprites( WEAPON *pWeapon )
 
 	sprintf( sz, "sprites/%s.txt", pWeapon->szName );
 	client_sprite_t *pList = SPR_GetList( sz, &i );
+
+	// Fallback sprite layout for scripted SWEPs without dedicated sprites/<class>.txt
+	if( !pList && XGLua_CL_FindSWEPMetaById( pWeapon->iId ) != NULL )
+	{
+		const char *fallback = ( pWeapon->iSlot == 1 ) ? "sprites/weapon_9mmhandgun.txt" : "sprites/weapon_9mmAR.txt";
+		pList = SPR_GetList( (char *)fallback, &i );
+	}
 
 	if( !pList )
 		return;
@@ -308,6 +317,37 @@ void CHudAmmo::Reset( void )
 	m_pWeapon = NULL; // reset last weapon
 }
 
+void XGLua_CL_SyncWeaponsToHUD( void )
+{
+	const size_t count = XGLua_CL_GetSWEPMetaCount();
+	bool addedAny = false;
+	for( size_t idx = 0; idx < count; ++idx )
+	{
+		const XGLuaCLSWEPMeta *m = XGLua_CL_GetSWEPMetaAt( idx );
+		if( !m || m->id <= 0 || m->id >= MAX_WEAPONS )
+			continue;
+
+		WEAPON w;
+		memset( &w, 0, sizeof( w ) );
+		strlcpy( w.szName, m->classname, sizeof( w.szName ) );
+		w.iAmmoType = -1;
+		w.iMax1 = -1;
+		w.iAmmo2Type = -1;
+		w.iMax2 = -1;
+		w.iSlot = Q_max( 0, Q_min( m->slot, MAX_WEAPON_SLOTS - 1 ) );
+		w.iSlotPos = Q_max( 0, Q_min( m->slotpos, MAX_WEAPON_POSITIONS - 1 ) );
+		w.iId = m->id;
+		w.iFlags = 0;
+		w.iClip = 0;
+
+		gWR.AddWeapon( &w );
+		addedAny = true;
+	}
+	// Force CHudAmmo::Think() to re-evaluate m_iWeaponBits and call PickupWeapon()
+	if( addedAny )
+		gWR.iOldWeaponBits = 0;
+}
+
 int CHudAmmo::VidInit( void )
 {
 	// Load sprites for buckets (top row of weapon menu)
@@ -322,6 +362,8 @@ int CHudAmmo::VidInit( void )
 
 	// If we've already loaded weapons, let's get new sprites
 	gWR.LoadAllWeaponSprites();
+
+	XGLua_CL_SyncWeaponsToHUD();
 
 	const int res = GetSpriteRes( ScreenWidth, ScreenHeight );
 	int factor;
@@ -1128,7 +1170,16 @@ int CHudAmmo::DrawWList( float flTime )
 
 				// Draw Ammo Bar
 				DrawAmmoBar( p, x + giABWidth / 2, y, giABWidth, giABHeight );
-				
+
+				// XGLua: overlay the real classname on Lua SWEP slots
+				if( XGLua_CL_FindSWEPMetaById( p->iId ) != NULL )
+				{
+					int tr = ( gpActiveSel == p ) ? 255 : 200;
+					int tg = ( gpActiveSel == p ) ? 200 : 160;
+					int tb = 40;
+					gHUD.DrawHudString( x + 4, y + giABHeight + 4, x + iWidth - 4, p->szName, tr, tg, tb );
+				}
+
 				y += p->rcActive.bottom - p->rcActive.top + 5;
 			}
 

@@ -25,6 +25,7 @@
 #include "player.h"
 #include "xglua_ballistics.h"
 #include "xglua_secondary_ammo.h"
+#include "lua/xglua_cl_swep_meta.h"
 #include "xglua_sound_precache.h"
 extern "C" {
 #include "lauxlib.h"
@@ -65,6 +66,13 @@ struct XGLuaSWEPInfo
 #define XGLUA_MAX_SWEP 64
 static XGLuaSWEPInfo g_SWEPs[XGLUA_MAX_SWEP];
 static int g_nSWEPs = 0;
+static XGLuaCLSWEPRegistry g_SVSWEPMeta;
+
+const XGLuaCLSWEPRegistry &XGLua_GetServerSWEPMeta( void )
+{
+	return g_SVSWEPMeta;
+}
+
 static char g_XGLuaSounds[XGLUA_SOUND_TOTAL][XGLUA_SOUND_PATH_BYTES];
 static int g_nXGLuaSounds = 0;
 
@@ -934,7 +942,16 @@ static int XGLua_BuildWeaponCacheCore( lua_State *L, void *ctx )
 			strncpy( swep->classname, classname, sizeof( swep->classname ) - 1 );
 			// v1: the client HUD only knows vanilla weapon names — report the
 			// 9mm pistol alias (design doc 9.5 P1; P2 removes this alias)
-			strcpy( swep->hudname, "weapon_9mmhandgun" );
+			XGLuaCLSWEPMeta meta;
+			std::memset( &meta, 0, sizeof( meta ) );
+			meta.id = swep->id;
+			std::strncpy( meta.classname, swep->classname, sizeof( meta.classname ) - 1 );
+			meta.slot = swep->slot;
+			meta.slotpos = swep->slotpos;
+			meta.primaryAutomatic = swep->primaryAutomatic;
+			meta.secondaryAutomatic = swep->secondaryAutomatic;
+			meta.clipsize = swep->clipsize;
+			g_SVSWEPMeta.Upsert( meta );
 			bool explicitSecondaryMax = fc.explicitSecondaryMax;
 			bool validSecondary = fc.validSecondary;
 			if( !swep->ammo1[0] )
@@ -1104,6 +1121,7 @@ static int XGLua_BuildWeaponCacheCore( lua_State *L, void *ctx )
 
 void XGLua_BuildWeaponCache( lua_State *L )
 {
+	g_SVSWEPMeta.Clear();
 	g_nSWEPs = 0;
 	g_nXGLuaSounds = 0;
 	// The whole build runs inside one protected frame as a safety net;

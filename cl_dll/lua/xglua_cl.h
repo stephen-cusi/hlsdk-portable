@@ -37,6 +37,22 @@ void XGLua_CL_RegisterNet( lua_State *L );
 void XGLua_CL_NetHookMessages( void );
 void XGLua_CL_NetReset( void );
 
+// cl_util.h's fabs() macro breaks <cmath> inside the codec headers;
+// save/restore around them (same hygiene as xglua_cl_predict.h users).
+#ifdef fabs
+#define XGLUA_CL_FABS_DEFINED 1
+#undef fabs
+#endif
+#include "lua/xglua_cl_swep_meta.h"
+#ifdef XGLUA_CL_FABS_DEFINED
+#undef XGLUA_CL_FABS_DEFINED
+#define fabs(x)	   ((x) > 0 ? (x) : 0 - (x))
+#endif
+const XGLuaCLSWEPMeta *XGLua_CL_FindSWEPMetaById( int id );
+const XGLuaCLSWEPMeta *XGLua_CL_FindSWEPMetaByClass( const char *classname );
+size_t XGLua_CL_GetSWEPMetaCount( void );
+const XGLuaCLSWEPMeta *XGLua_CL_GetSWEPMetaAt( size_t index );
+void XGLua_CL_SyncWeaponsToHUD( void );
 extern lua_State *g_xglua_cl_L;
 
 #endif // XGLUA_CL_H

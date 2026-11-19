@@ -19,6 +19,7 @@
 #include "lua/xglua_netcodec.h"
 #include "lua/xglua_netfrag.h"
 #include "lua/xglua_nwvar.h"
+#include "lua/xglua_cl_swep_meta.h"
 #include "hud.h"
 #include "cl_util.h"
 #include "lua/xglua_cl.h"
@@ -32,6 +33,7 @@ extern "C" {
 static std::vector<std::string> g_CLNetStrings;
 static XGLuaNetReassembler g_CLReassembler;
 static XGLuaNWStore g_CLNWStore;
+static XGLuaCLSWEPRegistry g_CLSWEPReg;
 static uint16_t g_CLNextSeq = 1;
 
 static bool g_CLWriting = false;
@@ -284,6 +286,7 @@ static void HandleStringTableSync( const std::vector<uint8_t> &payload )
 	g_CLNetStrings.clear();
 	XGLua_CL_MemVFSClear();
 	g_CLNWStore.Reset();
+	g_CLSWEPReg.Clear();
 	for( uint32_t i = 0; i < count; ++i )
 	{
 		uint32_t id = r.ReadUInt( 16 );
@@ -344,6 +347,15 @@ static int __MsgFunc_XGLNet( const char *pszName, int iSize, void *pbuf )
 		return 1;
 	}
 
+	if( hdr.flags & XGLUA_NET_FLAG_SWEPLIST )
+	{
+		XGLuaNetReader r;
+		r.Init( full.data(), full.size() );
+		if( g_CLSWEPReg.DecodeAll( r, true ) )
+			XGLua_CL_SyncWeaponsToHUD();
+		return 1;
+	}
+
 	if( hdr.flags & XGLUA_NET_FLAG_NWVAR )
 	{
 		XGLuaNetReader r;
@@ -379,6 +391,26 @@ void XGLua_CL_NetReset( void )
 	g_CLReading = false;
 	g_CLReassembler.Reset();
 	g_CLNetStrings.clear();
+}
+
+const XGLuaCLSWEPMeta *XGLua_CL_FindSWEPMetaById( int id )
+{
+	return g_CLSWEPReg.FindById( id );
+}
+
+const XGLuaCLSWEPMeta *XGLua_CL_FindSWEPMetaByClass( const char *classname )
+{
+	return g_CLSWEPReg.FindByClass( classname );
+}
+
+size_t XGLua_CL_GetSWEPMetaCount( void )
+{
+	return g_CLSWEPReg.items.size();
+}
+
+const XGLuaCLSWEPMeta *XGLua_CL_GetSWEPMetaAt( size_t index )
+{
+	return index < g_CLSWEPReg.items.size() ? &g_CLSWEPReg.items[index] : NULL;
 }
 
 void XGLua_CL_RegisterNet( lua_State *L )
