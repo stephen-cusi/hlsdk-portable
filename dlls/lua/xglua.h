@@ -62,7 +62,18 @@ int XGLua_EntityTakeDamage( CBaseEntity *victim, entvars_t *pevInflictor, entvar
 CBaseEntity *XGLua_SpawnLuaEntity( const char *classname, const Vector &origin );
 BOOL XGLua_IsLuaEntity( const char *classname );
 void XGLua_GetSENTRegistry( lua_State *L );
-void XGLua_BuildEntityCache( lua_State *L );
+void XGLua_BuildEntityCache( lua_State *L );
+//
+// Networking (M3 — xglua_net_server.cpp)
+//
+void XGLua_NetInit( void );
+void XGLua_NetLinkUserMessages( void );
+void XGLua_RegisterNetLibs( lua_State *L );
+void XGLua_NetFrame( lua_State *L );
+void XGLua_NetClientPutInServer( CBasePlayer *pPlayer );
+void XGLua_NetClientDisconnect( CBasePlayer *pPlayer );
+BOOL XGLua_NetClientCommand( edict_t *pEntity );
+void XGLua_NetShutdown( void );
 void XGLua_ClearEntityCache( void );
 
 //
@@ -107,6 +118,7 @@ void XGLua_RegisterTypes( lua_State *L );
 void XGLua_PushVector( lua_State *L, const Vector &v );
 Vector XGLua_CheckVector( lua_State *L, int idx );
 Vector XGLua_CheckAngle( lua_State *L, int idx );
+void XGLua_PushAngle( lua_State *L, const Vector &v );
 
 //
 // Shared VM pointer (NULL when no scripts loaded / shutdown)

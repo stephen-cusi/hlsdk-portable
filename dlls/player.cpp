@@ -233,7 +233,9 @@ void LinkUserMessages( void )
 	gmsgTeamNames = REG_USER_MSG( "TeamNames", -1 );
 
 	gmsgStatusText = REG_USER_MSG( "StatusText", -1 );
-	gmsgStatusValue = REG_USER_MSG( "StatusValue", 3 );
+	gmsgStatusValue = REG_USER_MSG( "StatusValue", 3 );
+	// XGLua: single variable-length user message for the Lua net library
+	XGLua_NetLinkUserMessages();
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )

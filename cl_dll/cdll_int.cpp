@@ -20,6 +20,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "lua/xglua_cl.h"
 #include "netadr.h"
 #include "parsemsg.h"
 
@@ -207,6 +208,8 @@ int DLLEXPORT HUD_VidInit( void )
 
 	VGui_Startup();
 
+	XGLua_CL_Startup();
+
 	return 1;
 }
 
@@ -225,6 +228,7 @@ void DLLEXPORT HUD_Init( void )
 	InitInput();
 	gHUD.Init();
 	Scheme_Init();
+	XGLua_CL_Init();
 }
 
 /*
@@ -287,6 +291,7 @@ Called by engine every frame that client .dll is loaded
 void DLLEXPORT HUD_Frame( double time )
 {
 	GetClientVoiceMgr()->Frame(time);
+	XGLua_CL_Frame( time );
 }
 
 /*

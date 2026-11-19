@@ -452,6 +452,7 @@ void XGLua_Init( void )
 	g_engfuncs.pfnAddServerCommand( "lua_openscript", XGLua_LuaOpenScript_f );
 	g_engfuncs.pfnAddServerCommand( "lua_cmd", XGLua_LuaCmd_f );
 	CVAR_REGISTER( &xgl_gamemode );
+	XGLua_NetInit();
 }
 
 void XGLua_Startup( void )
@@ -587,6 +588,7 @@ void XGLua_Startup( void )
 	XGLua_RegisterEntityLibs( L );
 	XGLua_RegisterWeaponLibs( L );
 	XGLua_RegisterConsole( L );
+	XGLua_RegisterNetLibs( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
 	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadEngineScript, g_szGameDir, XGLua_ReportError ) )
@@ -643,6 +645,7 @@ void XGLua_Shutdown( void )
 {
 	XGLua_ClearWeaponTracking();
 	XGLua_ClearEntityCache();
+	XGLua_NetShutdown();
 	if( !g_xglua_L )
 		return;
 
@@ -663,6 +666,7 @@ void XGLua_StartFrame( void )
 	XGLua_RunTimerTick( L, XGLua_ReportError );
 
 	XGLua_HookRun( L, "Think" );
+	XGLua_NetFrame( L );
 }
 
 static int XGLua_PushSpawnedPlayer( lua_State *L, void *ctx )

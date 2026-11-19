@@ -19,6 +19,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "lua/xglua_cl.h"
 //#include "triangleapi.h"
 
 #include "vgui_TeamFortressViewport.h"
@@ -160,7 +161,9 @@ int CHud::Redraw( float flTime, int intermission )
 			}
 
 			pList = pList->pNext;
-		}
+		}
+
+	XGLua_CL_HUDPaint();
 	}
 
 	// are we in demo mode? do we need to draw the logo in the top corner?

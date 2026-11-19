@@ -112,6 +112,7 @@ void ClientDisconnect( edict_t *pEntity )
 		CBaseEntity *pPlayer = CBaseEntity::Instance( pEntity );
 		if( pPlayer && pPlayer->IsPlayer() )
 			XGLua_PlayerDisconnected( (CBasePlayer *)pPlayer );
+			XGLua_NetClientDisconnect( (CBasePlayer *)pPlayer );
 	}
 
 	char text[256] = "";
@@ -210,6 +211,7 @@ void ClientPutInServer( edict_t *pEntity )
 	// XGLua: notification-only PlayerInitialSpawn, once per connection,
 	// before the first Spawn (which fires PlayerSpawn itself). Protected
 	// dispatch - Lua errors cannot interrupt the player entering the server.
+	XGLua_NetClientPutInServer( pPlayer );
 	XGLua_PlayerInitialSpawn( pPlayer );
 
 	// Allocate a CBasePlayer for pev, and call spawn
@@ -512,6 +514,12 @@ void ClientCommand( edict_t *pEntity )
 		return;
 
 	entvars_t *pev = &pEntity->v;
+
+	if( FStrEq( pcmd, "xgln" ) )
+	{
+		XGLua_NetClientCommand( pEntity );
+		return;
+	}
 
 	if( FStrEq( pcmd, "say" ) )
 	{

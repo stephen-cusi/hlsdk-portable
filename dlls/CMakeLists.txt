@@ -153,6 +153,7 @@ set (SVDLL_SOURCES
 	lua/xglua_damage.cpp
 	lua/xglua_sent.cpp
 	lua/xglua_gamerules.cpp
+	lua/xglua_net_server.cpp
 	../game_shared/voice_gamemgr.cpp
 	../pm_shared/pm_debug.c
 	../pm_shared/pm_math.c

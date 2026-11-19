@@ -28,6 +28,9 @@ include( "includes/modules/timer.lua" )
 include( "includes/modules/weapons.lua" )
 include( "includes/modules/scripted_ents.lua" )
 include( "includes/modules/gamemode.lua" )
+if CLIENT then
+	include( "includes/modules/draw.lua" )
+end
 
 -- Extensions (add functions onto the standard libraries)
 include( "includes/extensions/string.lua" )

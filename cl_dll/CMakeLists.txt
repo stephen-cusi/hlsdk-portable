@@ -160,7 +160,13 @@ else()
 		../external/openbsd/strlcat.c)
 endif()
 
+list(APPEND CLDLL_SOURCES
+	lua/xglua_cl_vm.cpp
+	lua/xglua_cl_net.cpp
+	lua/xglua_cl_surface.cpp)
+
 include_directories (. hl/ ../dlls ../dlls/wpn_shared ../common ../engine ../pm_shared ../game_shared ../public)
+include_directories(${XGLUA_LUAJIT_DIR}/src)
 
 if (GOLDSOURCE_SUPPORT)
 	include_directories (../external/)
@@ -170,7 +176,7 @@ endif()
 include_directories(../utils/vgui/include)
 
 add_library (${CLDLL_LIBRARY} SHARED ${CLDLL_SOURCES})
-target_link_libraries(${CLDLL_LIBRARY} vcs_info)
+target_link_libraries(${CLDLL_LIBRARY} vcs_info ${XGLUA_LUA_SHARED})
 
 if (GOLDSOURCE_SUPPORT)
 	target_link_libraries( ${CLDLL_LIBRARY} ${CMAKE_DL_LIBS} )
