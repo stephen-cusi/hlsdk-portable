@@ -53,7 +53,7 @@ function NPC:Think()
 	else
 		if CurTime() >= ( self.NextAttackTime or 0 ) then
 			self.NextAttackTime = CurTime() + 1.0
-			self:SetActivity( ACT_MELEE_ATTACK1 )
+			self:SetActivity( ACT_RANGE_ATTACK1 )
 			self:EmitSound( "barney/ba_attack2.wav" )
 			enemy:SetHealth( math.max( 0, enemy:Health() - 10 ) )
 			if enemy:Health() <= 0 then
@@ -68,6 +68,7 @@ function NPC:Think()
 end
 
 function NPC:OnTakeDamage( attacker, inflictor, damage, dmgType )
+	if self:Health() <= 0 then return end
 	if IsValid( attacker ) then
 		self:SetEnemy( attacker )
 	end
