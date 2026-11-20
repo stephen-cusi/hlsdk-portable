@@ -21,9 +21,19 @@ extern "C"  void DLLEXPORT IN_ClientMoveEvent( float forwardmove, float sidemove
 	currentInput->IN_ClientMoveEvent(forwardmove, sidemove);
 }
 
+extern int g_iVisibleMouse;
+int g_XGLuaMouseButtons = 0;
+
+void XGLua_ResetMouseButtons( void )
+{
+	currentInput->IN_MouseEvent( 0 );
+	g_XGLuaMouseButtons = 0;
+}
+
 extern "C" void DLLEXPORT IN_ClientLookEvent( float relyaw, float relpitch )
 {
-	currentInput->IN_ClientLookEvent(relyaw, relpitch);
+	if( !g_iVisibleMouse )
+		currentInput->IN_ClientLookEvent(relyaw, relpitch);
 }
 
 void IN_Move( float frametime, usercmd_t *cmd )
@@ -33,11 +43,14 @@ void IN_Move( float frametime, usercmd_t *cmd )
 
 extern "C" void DLLEXPORT IN_MouseEvent( int mstate )
 {
-	currentInput->IN_MouseEvent(mstate);
+	g_XGLuaMouseButtons = mstate;
+	if( !g_iVisibleMouse )
+		currentInput->IN_MouseEvent(mstate);
 }
 
 extern "C" void DLLEXPORT IN_ClearStates( void )
 {
+	g_XGLuaMouseButtons = 0;
 	currentInput->IN_ClearStates();
 }
 
@@ -48,6 +61,7 @@ extern "C" void DLLEXPORT IN_ActivateMouse( void )
 
 extern "C" void DLLEXPORT IN_DeactivateMouse( void )
 {
+	g_XGLuaMouseButtons = 0;
 	currentInput->IN_DeactivateMouse();
 }
 

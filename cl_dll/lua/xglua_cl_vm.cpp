@@ -34,6 +34,7 @@ extern "C" {
 }
 
 lua_State *g_xglua_cl_L = NULL;
+static bool g_CLHadLevel = false;
 
 //===========================================================================
 // Error reporting & VFS script loading
@@ -369,12 +370,15 @@ void XGLua_CL_Init( void )
 void XGLua_CL_Shutdown( void )
 {
 	XGLua_CL_NetReset();
+	g_CLHadLevel = false;
+	if( g_xglua_cl_L )
+	{
+		XGLua_HookRunProtected( g_xglua_cl_L, "ShutDown", NULL, NULL, XGLua_CL_ReportError );
+		lua_close( g_xglua_cl_L );
+		g_xglua_cl_L = NULL;
+	}
+	// Shutdown hooks may change cursor state: reset only after they finish.
 	XGLua_CL_SurfaceReset();
-	if( !g_xglua_cl_L )
-		return;
-	XGLua_HookRunProtected( g_xglua_cl_L, "ShutDown", NULL, NULL, XGLua_CL_ReportError );
-	lua_close( g_xglua_cl_L );
-	g_xglua_cl_L = NULL;
 }
 
 void XGLua_CL_Startup( void )
@@ -436,6 +440,19 @@ void XGLua_CL_Frame( double time )
 	(void)time;
 	if( !g_xglua_cl_L )
 		return;
+	// Xash clears the level name on disconnect without a client shutdown
+	// callback. Retire the realm once a previously loaded level disappears.
+	if( gEngfuncs.pfnGetLevelName )
+	{
+		const char *level = gEngfuncs.pfnGetLevelName();
+		if( level && level[0] )
+			g_CLHadLevel = true;
+		else if( g_CLHadLevel )
+		{
+			XGLua_CL_Shutdown();
+			return;
+		}
+	}
 	XGLua_RunTimerTick( g_xglua_cl_L, XGLua_CL_ReportError );
 	XGLua_HookRunProtected( g_xglua_cl_L, "Think", NULL, NULL, XGLua_CL_ReportError );
 }

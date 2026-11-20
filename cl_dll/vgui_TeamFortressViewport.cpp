@@ -1643,10 +1643,18 @@ void TeamFortressViewport::UpdateOnPlayerInfo()
 		m_pScoreBoard->Update();
 }
 
+extern int g_iVisibleMouse;
+
+void XGLua_UpdateCursorState( void )
+{
+	if( gViewPort )
+		gViewPort->UpdateCursorState();
+}
+
 void TeamFortressViewport::UpdateCursorState()
 {
-	// Need cursor if any VGUI window is up
-	if( m_pSpectatorPanel->m_menuVisible || m_pCurrentMenu || m_pTeamMenu->isVisible() || GetClientVoiceMgr()->IsInSquelchMode() )
+	// Need cursor if Lua clicker or any VGUI window is up
+	if( g_iVisibleMouse || m_pSpectatorPanel->m_menuVisible || m_pCurrentMenu || m_pTeamMenu->isVisible() || GetClientVoiceMgr()->IsInSquelchMode() )
 	{
 		CurrentMouseInput()->IN_SetVisibleMouse(true);
 		IgnoreNextMouseDelta();

@@ -21,8 +21,9 @@ extern "C" {
 // (Xash3D FWGS's input_goldsource.cpp no longer defines this global).
 int g_iVisibleMouse = 0;
 
-extern "C" void IN_ActivateMouse( void );
-extern "C" void IN_DeactivateMouse( void );
+extern void XGLua_UpdateCursorState( void );
+extern void XGLua_ResetMouseButtons( void );
+extern int g_XGLuaMouseButtons;
 
 //===========================================================================
 // Internal state: colors, fonts, textures, cursor
@@ -109,8 +110,9 @@ void XGLua_CL_SurfaceReset( void )
 	if( g_ScreenClickerEnabled )
 	{
 		g_ScreenClickerEnabled = false;
+		XGLua_ResetMouseButtons();
 		g_iVisibleMouse = 0;
-		IN_ActivateMouse();
+		XGLua_UpdateCursorState();
 	}
 }
 
@@ -414,12 +416,10 @@ static int gui_EnableScreenClicker( lua_State *L )
 	bool enable = lua_toboolean( L, 1 ) != 0;
 	if( enable == g_ScreenClickerEnabled )
 		return 0;
+	XGLua_ResetMouseButtons();
 	g_ScreenClickerEnabled = enable;
 	g_iVisibleMouse = enable ? 1 : 0;
-	if( enable )
-		IN_DeactivateMouse();
-	else
-		IN_ActivateMouse();
+	XGLua_UpdateCursorState();
 	return 0;
 }
 
@@ -446,9 +446,11 @@ static int input_IsMouseDown( lua_State *L )
 	// GMod MOUSE_LEFT = 107, MOUSE_RIGHT = 108, MOUSE_MIDDLE = 109 (also accept 1/2/3)
 	bool down = false;
 	if( code == 107 || code == 1 )
-		down = ( gHUD.m_iKeyBits & IN_ATTACK ) != 0;
+		down = ( g_XGLuaMouseButtons & 1 ) != 0;
 	else if( code == 108 || code == 2 )
-		down = ( gHUD.m_iKeyBits & IN_ATTACK2 ) != 0;
+		down = ( g_XGLuaMouseButtons & 2 ) != 0;
+	else if( code == 109 || code == 3 )
+		down = ( g_XGLuaMouseButtons & 4 ) != 0;
 	lua_pushboolean( L, down ? 1 : 0 );
 	return 1;
 }
