@@ -425,7 +425,13 @@ void XGLua_RegisterNPCLibs( lua_State *L )
 			lua_setfield( L, -2, f->name );
 		}
 	}
-	lua_pop( L, 1 );
+	lua_pop( L, 1 );
+	lua_pushinteger( L, ACT_IDLE );          lua_setglobal( L, "ACT_IDLE" );
+	lua_pushinteger( L, ACT_WALK );          lua_setglobal( L, "ACT_WALK" );
+	lua_pushinteger( L, ACT_RUN );           lua_setglobal( L, "ACT_RUN" );
+	lua_pushinteger( L, ACT_MELEE_ATTACK1 ); lua_setglobal( L, "ACT_MELEE_ATTACK1" );
+	lua_pushinteger( L, ACT_SMALL_FLINCH );  lua_setglobal( L, "ACT_SMALL_FLINCH" );
+	lua_pushinteger( L, ACT_DIESIMPLE );     lua_setglobal( L, "ACT_DIESIMPLE" );
 }
 
 //===========================================================================
