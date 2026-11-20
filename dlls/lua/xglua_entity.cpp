@@ -166,6 +166,16 @@ static int Ent_SetVelocity( lua_State *L )
 	VARS( pent )->velocity = XGLua_CheckVector( L, 2 );
 	return 0;
 }
+static int Ent_AddVelocity( lua_State *L )
+{
+	edict_t *pent = XGLua_CheckEntity( L, 1 );
+	extern Vector XGLua_CheckVector( lua_State *L, int idx );
+	Vector delta = XGLua_CheckVector( L, 2 );
+	if( !std::isfinite( delta.x ) || !std::isfinite( delta.y ) || !std::isfinite( delta.z ) )
+		return luaL_argerror( L, 2, "velocity delta must be finite" );
+	VARS( pent )->velocity = VARS( pent )->velocity + delta;
+	return 0;
+}
 
 static int Ent_SetSolid( lua_State *L )
 {
@@ -344,6 +354,16 @@ static int Ply_ViewPunch( lua_State *L )
 	if( !std::isfinite( angle.x ) || !std::isfinite( angle.y ) || !std::isfinite( angle.z ) )
 		return luaL_argerror( L, 2, "angle must be finite" );
 	p->pev->punchangle = p->pev->punchangle + angle;
+	return 0;
+}
+
+static int Ply_SetViewPunch( lua_State *L )
+{
+	CBasePlayer *p = Ply( L, 1 );
+	Vector angle = XGLua_CheckAngle( L, 2 );
+	if( !std::isfinite( angle.x ) || !std::isfinite( angle.y ) || !std::isfinite( angle.z ) )
+		return luaL_argerror( L, 2, "angle must be finite" );
+	p->pev->punchangle = angle;
 	return 0;
 }
 
@@ -566,6 +586,8 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "SetAngles", Ent_SetAngles },
 		{ "GetVelocity", Ent_GetVelocity },
 		{ "SetVelocity", Ent_SetVelocity },
+		{ "AddVelocity", Ent_AddVelocity },
+		{ "SetViewPunch", Ply_SetViewPunch },
 		{ "SetNextThink", Ent_SetNextThink },
 		{ "NextThink", Ent_SetNextThink },
 		{ "SetSolid", Ent_SetSolid },

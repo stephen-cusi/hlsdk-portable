@@ -20,6 +20,12 @@ for _, assetPath in ipairs( REQUIRED_ASSETS ) do
 	end
 end
 
+-- Register standalone 5.56mm belt ammo type (GMod style)
+game.AddAmmoType( {
+	name     = "556",
+	maxcarry = 200
+} )
+
 -- Sequence table verified from gearbox/models/v_saw.mdl (activity=0 on all sequences)
 local SEQ_SLOWIDLE = 0
 local SEQ_IDLE2    = 1
@@ -135,19 +141,19 @@ function SWEP:PrimaryAttack()
 		self:EjectBrass( "models/saw_shell.mdl", math.random( -60, -35 ), math.random( 110, 140 ), 18, 4, -5 )
 	end
 
-	-- View punch + ground recoil pushback
-	local pitchKick = -( 1.0 + math.random() * 0.5 )
+	-- Overwrite punchangle + incremental horizontal pushback (matching m249.cpp)
+	local pitchKick = 1.0 + math.random() * 0.5
 	local yawKick   = -0.5 + math.random() * 0.3
-	owner:ViewPunch( Angle( pitchKick, yawKick, 0 ) )
+	owner:SetViewPunch( Angle( pitchKick, yawKick, 0 ) )
 
 	if owner:OnGround() then
-		local aim = owner:GetAimVector()
-		local vel = owner:GetVelocity()
-		owner:SetVelocity( Vector( vel.x - aim.x * 35, vel.y - aim.y * 35, vel.z ) )
+		local aim  = owner:GetAimVector()
+		local push = 40 + math.random( 1, 2 ) * 2
+		owner:AddVelocity( Vector( -aim.x * push, -aim.y * push, 0 ) )
 	end
 
-	local nextDelay = self:GetNextAttackDelay( 0.067 )
-	self:SetNextPrimaryFire( CurTime() + nextDelay )
+	-- GetNextAttackDelay already returns an absolute timestamp; set directly
+	self:SetNextAttackDelay( 0.067 )
 	self:SetWeaponIdleTime( CurTime() + 0.5 )
 end
 

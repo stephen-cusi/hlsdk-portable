@@ -27,6 +27,7 @@ include( "includes/modules/hook.lua" )
 include( "includes/modules/timer.lua" )
 include( "includes/modules/weapons.lua" )
 include( "includes/modules/scripted_ents.lua" )
+include( "includes/modules/game.lua" )
 include( "includes/modules/gamemode.lua" )
 include( "includes/modules/net.lua" )
 include( "includes/modules/nwvar.lua" )
@@ -37,6 +38,10 @@ end
 if SERVER then
 	include( "includes/modules/npc.lua" )
 end
+
+include( "includes/modules/capabilities.lua" )
+capabilities.Register( "xglua.weapons", 1, weapons )
+if CLIENT then capabilities.Register( "xglua.vgui", 1, vgui ) end
 
 -- Extensions (add functions onto the standard libraries)
 include( "includes/extensions/string.lua" )
