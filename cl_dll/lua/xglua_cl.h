@@ -33,6 +33,8 @@ void XGLua_CL_MemVFSClear( void );
 
 // Client libraries
 void XGLua_CL_RegisterSurface( lua_State *L );
+void XGLua_CL_RegisterInputAndGUI( lua_State *L );
+void XGLua_CL_SurfaceReset( void );
 void XGLua_CL_RegisterNet( lua_State *L );
 void XGLua_CL_NetHookMessages( void );
 void XGLua_CL_NetReset( void );

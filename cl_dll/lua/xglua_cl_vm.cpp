@@ -369,6 +369,7 @@ void XGLua_CL_Init( void )
 void XGLua_CL_Shutdown( void )
 {
 	XGLua_CL_NetReset();
+	XGLua_CL_SurfaceReset();
 	if( !g_xglua_cl_L )
 		return;
 	XGLua_HookRunProtected( g_xglua_cl_L, "ShutDown", NULL, NULL, XGLua_CL_ReportError );
@@ -412,6 +413,7 @@ void XGLua_CL_Startup( void )
 	}
 
 	XGLua_CL_RegisterSurface( L );
+	XGLua_CL_RegisterInputAndGUI( L );
 	XGLua_CL_RegisterNet( L );
 	XGLua_CL_RegisterPredictLibs( L );
 
