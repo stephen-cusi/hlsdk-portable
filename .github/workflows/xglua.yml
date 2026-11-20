@@ -194,12 +194,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install multilib (i386)
         if: matrix.arch == 'i386'
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib g++-multilib
       - name: Build LuaJIT static archive
         run: |
           cd xglua-luajit/src
           if [ "${{ matrix.arch }}" = "i386" ]; then
-            # host tools stay 64-bit, only the LuaJIT target is 32-bit
+            # both host tools and the LuaJIT target are 32-bit
             make -j2 HOST_CC="gcc -m32 -O2" CC="gcc -m32 -fPIC -O2"
           else
             # -fPIC is required: the static archive is linked into the

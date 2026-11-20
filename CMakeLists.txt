@@ -182,15 +182,22 @@ if(MSVC)
 			"Build it first: cd <xglua-luajit> && script\\build.bat ${BUILDARCH} dll")
 	endif()
 else()
-	if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/liblua_shared.a")
-		message(STATUS "XGLua: liblua_shared.a found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}")
-		set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/liblua_shared.a")
+	# LibraryNaming leaves BUILDARCH empty for desktop x86, but LuaJIT CI
+	# stores its 32-bit archive in dist/i386. Prefer that explicit directory
+	# when present; retain dist/ as a fallback for existing local builds.
+	set(XGLUA_LUA_ARCH "${BUILDARCH}")
+	if(XASH_X86 AND NOT BUILDARCH AND EXISTS "${XGLUA_LUAJIT_DIR}/dist/i386/liblua_shared.a")
+		set(XGLUA_LUA_ARCH "i386")
+	endif()
+	if(EXISTS "${XGLUA_LUAJIT_DIR}/dist/${XGLUA_LUA_ARCH}/liblua_shared.a")
+		message(STATUS "XGLua: liblua_shared.a found at ${XGLUA_LUAJIT_DIR}/dist/${XGLUA_LUA_ARCH}")
+		set(XGLUA_LUA_SHARED "${XGLUA_LUAJIT_DIR}/dist/${XGLUA_LUA_ARCH}/liblua_shared.a")
 	else()
 		message(FATAL_ERROR
-			"XGLua: liblua_shared.a not found at ${XGLUA_LUAJIT_DIR}/dist/${BUILDARCH}/\n"
+			"XGLua: liblua_shared.a not found at ${XGLUA_LUAJIT_DIR}/dist/${XGLUA_LUA_ARCH}/\n"
 			"Build LuaJIT first (exact commands in .github/workflows/xglua.yml):\n"
 			"  Linux:   make -j2 CC=\"gcc -fPIC -O2\" in xglua-luajit/src, then\n"
-			"           cp src/libluajit.a ../xglua-luajit/dist/${BUILDARCH}/liblua_shared.a\n"
+			"           cp src/libluajit.a ../xglua-luajit/dist/${XGLUA_LUA_ARCH}/liblua_shared.a\n"
 			"  Android: NDK cross build with STATIC_CC/DYNAMIC_CC set to the NDK clang")
 	endif()
 endif()
