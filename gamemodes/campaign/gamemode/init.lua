@@ -1,0 +1,1 @@
+-- Intentionally no overrides: preserve native campaign behavior.

@@ -15,6 +15,7 @@
 #include "xglua_vm_include.h" // XGLua_IncludePath / XGLUA_INCLUDE_PATH_MAX
 #include "weapons.h"
 #include "player.h"
+#include "gamerules.h"
 #include "enginecallback.h"
 extern "C" {
 #include "lauxlib.h"
@@ -202,6 +203,50 @@ static int Ent_GetModel( lua_State *L )
 	return 1;
 }
 
+// Lightweight networked visual controls for Lua sprites and entities.
+static int Ent_SetRenderMode( lua_State *L )
+{
+    edict_t *e = XGLua_CheckEntity( L, 1 );
+    int mode = (int)luaL_checkinteger( L, 2 );
+    if( mode < 0 || mode > 5 ) return luaL_argerror( L, 2, "invalid render mode" );
+    VARS( e )->rendermode = mode; return 0;
+}
+static int Ent_SetRenderFX( lua_State *L )
+{
+    edict_t *e = XGLua_CheckEntity( L, 1 );
+    int fx = (int)luaL_checkinteger( L, 2 );
+    if( fx < 0 || fx > 20 ) return luaL_argerror( L, 2, "invalid render effect" );
+    VARS( e )->renderfx = fx; return 0;
+}
+static int Ent_SetRenderAmount( lua_State *L )
+{
+    edict_t *e = XGLua_CheckEntity( L, 1 );
+    double amount = luaL_checknumber( L, 2 );
+    if( !std::isfinite( amount ) || amount < 0 || amount > 255 ) return luaL_argerror( L, 2, "amount must be between 0 and 255" );
+    VARS( e )->renderamt = (float)amount; return 0;
+}
+static int Ent_SetModelScale( lua_State *L )
+{
+    edict_t *e = XGLua_CheckEntity( L, 1 );
+    double scale = luaL_checknumber( L, 2 );
+    if( !std::isfinite( scale ) || scale <= 0 || scale > 16 ) return luaL_argerror( L, 2, "scale must be between 0 and 16" );
+    VARS( e )->scale = (float)scale; return 0;
+}
+static int Ent_SetNoDraw( lua_State *L )
+{
+    edict_t *e = XGLua_CheckEntity( L, 1 );
+    if( lua_toboolean( L, 2 ) ) VARS( e )->effects |= EF_NODRAW;
+    else VARS( e )->effects &= ~EF_NODRAW;
+    return 0;
+}
+
+// Marks a sprite for local-client aim tracing. The owner remains server authority.
+static int Ent_SetAimFollower( lua_State *L )
+{
+ edict_t *e = XGLua_CheckEntity( L, 1 );
+ VARS( e )->body = lua_toboolean( L, 2 ) ? 237 : 0;
+ return 0;
+}
 static int Ent_SetModel( lua_State *L )
 {
 	edict_t *pent = XGLua_CheckEntity( L, 1 );
@@ -563,6 +608,13 @@ static int XGLua_file_Exists( lua_State *L )
 	return 1;
 }
 
+// GoldSrc game rules decide campaign versus multiplayer, independently of slots.
+static int game_SinglePlayer( lua_State *L )
+{
+	lua_pushboolean( L, g_pGameRules && !g_pGameRules->IsMultiplayer() );
+	return 1;
+}
+
 void XGLua_RegisterEntityLibs( lua_State *L )
 {
 	extern void XGLua_RegisterTypes( lua_State *L );
@@ -595,6 +647,12 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "SetCollisionBounds", Ent_SetCollisionBounds },
 		{ "GetModel", Ent_GetModel },
 		{ "SetModel", Ent_SetModel },
+		{ "SetAimFollower", Ent_SetAimFollower },
+		{ "SetRenderMode", Ent_SetRenderMode },
+		{ "SetRenderFX", Ent_SetRenderFX },
+		{ "SetRenderAmount", Ent_SetRenderAmount },
+		{ "SetModelScale", Ent_SetModelScale },
+		{ "SetNoDraw", Ent_SetNoDraw },
 		{ "Health", Ent_GetHealth },
 		{ "SetHealth", Ent_SetHealth },
 		{ "GetMaxHealth", Ent_GetMaxHealth },
@@ -703,6 +761,8 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 	lua_setfield( L, -2, "GetMap" );
 	lua_pushcfunction( L, game_MaxPlayers );
 	lua_setfield( L, -2, "MaxPlayers" );
+	lua_pushcfunction( L, game_SinglePlayer );
+	lua_setfield( L, -2, "SinglePlayer" );
 	lua_pushcfunction( L, game_GetWorld );
 	lua_setfield( L, -2, "GetWorld" );
 	lua_setglobal( L, "game" );

@@ -19,10 +19,10 @@ inline bool XGLua_ValidBulletSpread( const Vector &spread )
 // Kept engine-independent apart from the player/vector interface so the same
 // dispatch path can be exercised with an instrumented player in native tests.
 template <class Player>
-inline void XGLua_FirePlayerBullets( Player *player, int damage, int count, const Vector &spread )
+inline void XGLua_FirePlayerBullets( Player *player, int damage, int count, const Vector &spread, int damageFlags = -1 )
 {
 	UTIL_MakeVectors( player->pev->v_angle + player->pev->punchangle );
 	const Vector direction = gpGlobals->v_forward;
 	player->FireBulletsPlayer( (ULONG)count, player->GetGunPosition(), direction,
-		spread, 8192.0f, BULLET_PLAYER_9MM, 0, damage, player->pev, player->random_seed );
+		spread, 8192.0f, BULLET_PLAYER_9MM, 0, damage, player->pev, player->random_seed, damageFlags );
 }

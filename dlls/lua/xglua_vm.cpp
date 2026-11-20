@@ -32,6 +32,7 @@
 #include "xglua_vm_timer.h"
 #include "lua/xglua_dev.h"
 #include "player.h"
+#include "gamerules.h"
 extern "C" {
 #include "lualib.h"
 #include "lauxlib.h"
@@ -40,6 +41,7 @@ extern "C" {
 #include "xglua_vm_vfs.h"
 // M4 first batch: server gamemode chain (header-only, this is the only TU)
 #include "xglua_gamemode.h"
+#include "xglua_addon_load.h"
 
 lua_State *g_xglua_L = NULL;
 
@@ -605,7 +607,7 @@ BOOL XGLua_IsLuaWeapon( const char *classname )
 //===========================================================================
 
 // gamemode selection (design doc 3.3): xgl_gamemode "<name>" in server.cfg;
-// empty means no gamemode and keeps the plain startup behavior
+// empty selects the default for the active rules; "none" disables Lua gamemodes
 static cvar_t xgl_gamemode = { "xgl_gamemode", "" };
 
 void XGLua_Init( void )
@@ -781,20 +783,42 @@ void XGLua_Startup( void )
 		return;
 	}
 
-	// 2. gamemode chain (design doc 4.2: includes -> gamemode -> autorun).
-	// Selected via xgl_gamemode; base chain from gamemodes/<n>/<n>.txt;
-	// shared.lua then init.lua per mode, base first. Installs GM/GAMEMODE
-	// before autorun so hook.Run already has its gamemode fallback. Any
-	// failure is diagnosed and skipped - the server keeps the plain behavior.
+	// Resolve the native rules first: gameplay mode and engine session are
+	// separate decisions. Legacy mode manifests default to multiplayer.
 	{
-		const char *szMode = CVAR_GET_STRING( "xgl_gamemode" );
-		if( szMode && szMode[0] )
+		const char *nativeRules = "singleplayer";
+		if( g_pGameRules && g_pGameRules->IsTeamplay() ) nativeRules = "teamplay";
+		else if( g_pGameRules && g_pGameRules->IsBustingGame() ) nativeRules = "busters";
+		else if( g_pGameRules && g_pGameRules->IsMultiplayer() ) nativeRules = "multiplayer";
+		const char *family = gpGlobals->coop ? "coop" : nativeRules;
+
+		const char *configured = CVAR_GET_STRING( "xgl_gamemode" );
+		const char *szMode = configured ? configured : "";
+		if( !szMode[0] )
+		{
+			if( std::strcmp( family, "singleplayer" ) == 0 ) szMode = "campaign";
+			else if( std::strcmp( family, "multiplayer" ) == 0 ) szMode = "deathmatch";
+		}
+		if( std::strcmp( szMode, "none" ) == 0 ) szMode = "";
+
+		// Snapshot for Lua: it describes the active native rules, not a way
+		// for scripts to change the engine session or g_pGameRules.
+		lua_newtable( L );
+		lua_pushstring( L, nativeRules ); lua_setfield( L, -2, "nativeRules" );
+		lua_pushstring( L, family ); lua_setfield( L, -2, "compatibility" );
+		lua_pushboolean( L, gpGlobals->deathmatch != 0 ); lua_setfield( L, -2, "deathmatch" );
+		lua_pushboolean( L, gpGlobals->coop != 0 ); lua_setfield( L, -2, "coop" );
+		lua_pushinteger( L, gpGlobals->maxClients ); lua_setfield( L, -2, "maxClients" );
+		lua_pushstring( L, szMode ); lua_setfield( L, -2, "requestedMode" );
+		lua_setglobal( L, "XGLUA_MODE_CONTEXT" );
+
+		if( szMode[0] )
 		{
 			char szGMError[256];
 			XGLua_GMResult gm = XGLua_LoadGamemodeChain( L, XGLua_ReadEngineRoot, g_szGameDir,
-				szMode, szGMError, sizeof( szGMError ) );
+				szMode, szGMError, sizeof( szGMError ), family );
 			if( gm == XGLUA_GM_OK )
-				ALERT( at_console, "[XGLua] gamemode loaded: %s\n", szMode );
+				ALERT( at_console, "[XGLua] gamemode loaded: %s (rules: %s)\n", szMode, family );
 			else
 				ALERT( at_console, "[XGLua] gamemode '%s' not loaded (%d): %s\n", szMode, (int)gm, szGMError );
 		}
@@ -806,6 +830,9 @@ void XGLua_Startup( void )
 
 	// 4. weapons — each file builds the global SWEP table
 	XGLua_LoadFolder( L, "weapons", false, "SWEP" );
+
+	// Addons load before the cache freezes; each script has its own protected call.
+	XGLua_LoadAddonWeapons( L, g_szGameDir, XGLua_ReadEngineRoot, g_szGameDir, XGLua_ReportError );
 
 	// 4b. snapshot SWEP tables into the C++ cache (ItemInfoArray etc.)
 	XGLua_BuildWeaponCache( L );

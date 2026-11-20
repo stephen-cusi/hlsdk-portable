@@ -138,70 +138,51 @@ function WeaponBase:StartSpecialReload( cfg )
 	return true
 end
 
--- Advances active special reload stages; returns true while reload owns animation/state.
+-- Called by the native reload dispatcher before it transfers ammunition.
+-- Display the prospective belt while the real inventory stays unchanged.
+function WeaponBase:AdvanceSpecialReload()
+	if self._SpecialReloadStage ~= 1 or not self:IsReloading() then return end
+	local cfg = self._SpecialReloadCfg or {}
+	local clip = self:Clip1()
+	local preview = clip + math.min( math.max( 0, self:GetMaxClip1() - clip ), self:Ammo1() )
+	local body = self:GetBodyForClip( preview )
+	if type( self.SetBody ) == "function" then self:SetBody( body ) end
+	local closeDelay = cfg.CloseDelay or 0
+	if cfg.CloseAnim ~= nil then self:SendWeaponAnim( cfg.CloseAnim, body ) end
+	if closeDelay > 0 then
+		local readyAt = CurTime() + closeDelay
+		self:SetNextPrimaryFire( readyAt )
+		self:SetNextSecondaryFire( readyAt )
+		self:SetNextAttack( closeDelay )
+		self:SetWeaponIdleTime( readyAt )
+	end
+	self._SpecialReloadStage = 2
+	self._SpecialReloadUntil = CurTime() + closeDelay
+end
+
+-- The clip is actually filled by native code after the closing animation.
 function WeaponBase:ThinkSpecialReload()
 	local stage = self._SpecialReloadStage or 0
-	if stage == 0 then
-		return false
-	end
-
-	if stage == 1 then
-		-- Wait until C++ ItemPostFrame finishes the timed clip refill.
-		if self:IsReloading() then
-			return true
-		end
-
-		local cfg        = self._SpecialReloadCfg or {}
-		local body       = self:UpdateBodyFromClip()
-		local closeAnim  = cfg.CloseAnim
-		local closeDelay = cfg.CloseDelay or 0
-
-		if type( self.OnReloadClipFilled ) == "function" then
-			self:OnReloadClipFilled( body )
-		end
-
-		if closeAnim ~= nil and closeDelay > 0 then
-			self:SendWeaponAnim( closeAnim, body )
-			local readyAt = CurTime() + closeDelay
-			self:SetNextPrimaryFire( readyAt )
-			self:SetNextSecondaryFire( readyAt )
-			if type( self.SetNextAttack ) == "function" then
-				self:SetNextAttack( closeDelay )
-			end
-			if type( self.SetWeaponIdleTime ) == "function" then
-				self:SetWeaponIdleTime( readyAt )
-			end
-			self._SpecialReloadStage = 2
-			self._SpecialReloadUntil = readyAt
-			return true
-		end
-
-		self._SpecialReloadStage = 0
-		self._SpecialReloadCfg   = nil
-		if type( self.OnReloadComplete ) == "function" then
-			self:OnReloadComplete()
-		end
-		return false
-	end
-
+	if stage == 0 then return false end
+	if self:IsReloading() then return true end
 	if stage == 2 then
-		if CurTime() < ( self._SpecialReloadUntil or 0 ) then
-			return true
-		end
+		local body = self:UpdateBodyFromClip()
+		if type( self.OnReloadClipFilled ) == "function" then self:OnReloadClipFilled( body ) end
 		self._SpecialReloadStage = 0
-		self._SpecialReloadCfg   = nil
+		self._SpecialReloadCfg = nil
 		self._SpecialReloadUntil = 0
-		if type( self.OnReloadComplete ) == "function" then
-			self:OnReloadComplete()
-		end
+		if type( self.OnReloadComplete ) == "function" then self:OnReloadComplete() end
 		return false
 	end
-
+	-- A cancelled native reload must not leave the weapon permanently locked.
 	self._SpecialReloadStage = 0
+	self._SpecialReloadCfg = nil
+	self._SpecialReloadUntil = 0
 	return false
 end
 
 function WeaponBase:Holster()
+	if ( self._SpecialReloadStage or 0 ) > 0 then self:UpdateBodyFromClip() end
 	self._SpecialReloadStage = 0
 	self._SpecialReloadCfg   = nil
 	self._SpecialReloadUntil = 0

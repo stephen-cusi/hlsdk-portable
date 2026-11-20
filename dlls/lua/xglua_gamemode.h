@@ -46,7 +46,8 @@ enum XGLua_GMResult
 	XGLUA_GM_CYCLE,
 	XGLUA_GM_TOO_DEEP,
 	XGLUA_GM_NO_MODULE,
-	XGLUA_GM_INTERNAL
+	XGLUA_GM_INTERNAL,
+	XGLUA_GM_INCOMPATIBLE
 };
 
 // Gamemode names become path components: restricted charset, no separators,
@@ -147,8 +148,9 @@ static bool XGLua_GMKVExpect( XGLua_GMKVScanner *s, char c, bool *bad )
 // out receives the base name (empty string when the metadata declares no
 // base). Only the first "base" key is honored, matching GMod behavior.
 static bool XGLua_GMParseBase( const char *data, size_t len, char *out, size_t outlen,
-	int *errLine )
+	int *errLine, char *rules = NULL, size_t ruleslen = 0 )
 {
+	if( rules && ruleslen ) rules[0] = '\0';
 	out[0] = '\0';
 	*errLine = 0;
 	if( len >= 3 && (unsigned char)data[0] == 0xef && (unsigned char)data[1] == 0xbb &&
@@ -160,6 +162,7 @@ static bool XGLua_GMParseBase( const char *data, size_t len, char *out, size_t o
 	XGLua_GMKVScanner s = { data, data + len, 1 };
 	bool bad = false;
 	bool baseSeen = false;
+	bool rulesSeen = false;
 	char root[XGLUA_GM_TOKEN_MAX + 1];
 	char key[XGLUA_GM_TOKEN_MAX + 1], value[XGLUA_GM_TOKEN_MAX + 1];
 
@@ -182,6 +185,15 @@ static bool XGLua_GMParseBase( const char *data, size_t len, char *out, size_t o
 		}
 		if( !XGLua_GMKVToken( &s, key, sizeof( key ), &bad ) ) { *errLine = s.line; return false; }
 		if( !XGLua_GMKVToken( &s, value, sizeof( value ), &bad ) ) { *errLine = s.line; return false; }
+		if( !rulesSeen && std::strcmp( key, "rules" ) == 0 )
+		{
+			rulesSeen = true;
+			if( rules && ruleslen )
+			{
+				if( std::strlen( value ) >= ruleslen ) { *errLine = s.line; return false; }
+				std::snprintf( rules, ruleslen, "%s", value );
+			}
+		}
 		if( !baseSeen && std::strcmp( key, "base" ) == 0 )
 		{
 			baseSeen = true;
@@ -382,7 +394,7 @@ static char *XGLua_GMReadFile( XGLua_GMLoadIO *io, const char *rel, size_t *len,
 // and mirrored into GAMEMODE, or a failure code with a diagnostic and both
 // globals cleared.
 static XGLua_GMResult XGLua_LoadGamemodeChain( lua_State *L, XGLuaReadScript read, void *readCtx,
-	const char *requested, char *err, size_t errlen )
+	const char *requested, char *err, size_t errlen, const char *ruleFamily = NULL )
 {
 	if( err && errlen ) err[0] = '\0';
 	if( !L )
@@ -426,13 +438,23 @@ static XGLua_GMResult XGLua_LoadGamemodeChain( lua_State *L, XGLuaReadScript rea
 		}
 
 		char base[XGLUA_GM_NAME_MAX + 1];
+		char rules[32];
 		int errLine = 0;
-		bool parsed = XGLua_GMParseBase( data, len, base, sizeof( base ), &errLine );
+		bool parsed = XGLua_GMParseBase( data, len, base, sizeof( base ), &errLine, rules, sizeof( rules ) );
 		std::free( data );
 		if( !parsed )
 		{
 			std::snprintf( err, errlen, "malformed metadata %s near line %d", rel, errLine );
 			return XGLua_GMAbort( L, XGLUA_GM_BAD_META );
+		}
+		// Old gamemodes predate the declaration and target multiplayer rules.
+		// Resolve the complete chain before executing any user script.
+		const char *required = rules[0] ? rules : "multiplayer";
+		if( ruleFamily && std::strcmp( required, "any" ) != 0 &&
+			std::strcmp( required, ruleFamily ) != 0 )
+		{
+			std::snprintf( err, errlen, "gamemode '%s' requires rules '%s', current rules '%s'", cur, required, ruleFamily );
+			return XGLua_GMAbort( L, XGLUA_GM_INCOMPATIBLE );
 		}
 		if( !base[0] )
 			break;	// root reached

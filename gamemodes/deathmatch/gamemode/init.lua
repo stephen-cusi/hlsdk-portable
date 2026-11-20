@@ -1,0 +1,1 @@
+-- Inherit base; unhandled decisions fall back to native multiplayer rules.

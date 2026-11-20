@@ -1,0 +1,5 @@
+"campaign"
+{
+    "title" "Half-Life Campaign"
+    "rules" "singleplayer"
+}

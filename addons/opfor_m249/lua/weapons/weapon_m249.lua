@@ -6,6 +6,7 @@ local REQUIRED_ASSETS = {
 	"models/w_saw.mdl",
 	"models/p_saw.mdl",
 	"models/saw_shell.mdl",
+	"models/saw_link.mdl",
 	"sound/weapons/saw_fire1.wav",
 	"sound/weapons/saw_fire2.wav",
 	"sound/weapons/saw_fire3.wav",
@@ -25,6 +26,35 @@ game.AddAmmoType( {
 	name     = "556",
 	maxcarry = 200
 } )
+
+-- The pickup lives in the same addon as the weapon. The current addon loader
+-- discovers weapon scripts before the scripted-entity cache is built.
+if file.Exists( "models/w_saw_clip.mdl" ) and file.Exists( "sound/items/xgm249_ammo.wav" ) then
+    local ammo = {
+        Type = "anim", Base = "base_entity", PrintName = "M249 5.56mm belt",
+        Spawnable = true, Model = "models/w_saw_clip.mdl",
+        PrecacheSounds = { "items/xgm249_ammo.wav" }
+    }
+    function ammo:Initialize()
+        self:SetModel( self.Model )
+        self:SetMoveType( MOVETYPE_TOSS )
+        self:SetSolid( SOLID_TRIGGER )
+        self:SetCollisionBounds( Vector( -16, -16, 0 ), Vector( 16, 16, 16 ) )
+    end
+    function ammo:Touch( other )
+        if not IsValid( other ) or not other:IsPlayer() then return end
+        local before = other:GetAmmoCount( "556" )
+        if before >= 200 then return end
+        other:GiveAmmo( 50, "556", 200 )
+        if other:GetAmmoCount( "556" ) > before then
+            self:EmitSound( "items/xgm249_ammo.wav" )
+            self:Remove()
+        end
+    end
+    scripted_ents.Register( ammo, "xgl_ammo_556" )
+else
+    print( "[XGLua] xgl_ammo_556: missing addon pickup model or sound; pickup disabled" )
+end
 
 -- Sequence table verified from gearbox/models/v_saw.mdl (activity=0 on all sequences)
 local SEQ_SLOWIDLE = 0
@@ -72,7 +102,8 @@ SWEP.Secondary = {
 }
 
 SWEP.PrecacheModels = {
-	"models/saw_shell.mdl"
+	"models/saw_shell.mdl",
+	"models/saw_link.mdl"
 }
 
 SWEP.PrecacheSounds = {
@@ -88,7 +119,7 @@ SWEP.SpecialReload = {
 	OpenAnim   = SEQ_LAUNCH,
 	OpenDelay  = 1.33,
 	CloseAnim  = SEQ_RELOAD1,
-	CloseDelay = 1.0
+	CloseDelay = 2.4
 }
 
 SWEP.IdleSeq       = SEQ_SLOWIDLE
@@ -113,12 +144,19 @@ function SWEP:Deploy()
 end
 
 function SWEP:PrimaryAttack()
-	if not self:CanPrimaryAttack() then
+	local owner = self:GetOwner()
+	if not IsValid( owner ) then
 		return
 	end
 
-	local owner = self:GetOwner()
-	if not IsValid( owner ) then
+	-- Opposing Force M249 cannot shoot when fully submerged.
+	if owner:WaterLevel() == 3 then
+		self:PlayEmptySound()
+		self:SetNextPrimaryFire( CurTime() + 0.15 )
+		return
+	end
+	if not self:CanPrimaryAttack() then
+		self:SetNextPrimaryFire( CurTime() + 0.15 )
 		return
 	end
 
@@ -130,13 +168,15 @@ function SWEP:PrimaryAttack()
 	self:SendOwnerAttackAnimation()
 	self:EmitSound( FIRE_SOUNDS[ math.random( 1, #FIRE_SOUNDS ) ] )
 
-	local spread = owner:Crouching() and CONE_3DEG or CONE_6DEG
-	self:ShootBullet( 18, 1, spread )
+	-- Match Opposing Force: six degrees in campaign, three in multiplayer.
+	local spread = game.SinglePlayer() and CONE_6DEG or CONE_3DEG
+	-- Default skillopfor.cfg value; dynamic skill cvars are not wired up yet.
+	self:ShootBullet( 15, 1, spread )
 
 	-- Alternating shell ejection (right vs left/upward kick matching m249.cpp)
 	self._AltEject = not self._AltEject
 	if self._AltEject then
-		self:EjectBrass( "models/saw_shell.mdl", math.random( 90, 120 ), math.random( 90, 120 ), 18, 8, -6 )
+		self:EjectBrass( "models/saw_link.mdl", math.random( 90, 120 ), math.random( 90, 120 ), 18, 8, -6 )
 	else
 		self:EjectBrass( "models/saw_shell.mdl", math.random( -60, -35 ), math.random( 110, 140 ), 18, 4, -5 )
 	end
@@ -152,7 +192,7 @@ function SWEP:PrimaryAttack()
 		owner:AddVelocity( Vector( -aim.x * push, -aim.y * push, 0 ) )
 	end
 
-	-- GetNextAttackDelay already returns an absolute timestamp; set directly
+	-- The bridge converts the engine weapon clock to an absolute SWEP deadline.
 	self:SetNextAttackDelay( 0.067 )
 	self:SetWeaponIdleTime( CurTime() + 0.5 )
 end

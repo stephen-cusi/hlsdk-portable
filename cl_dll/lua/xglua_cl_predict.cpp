@@ -5,6 +5,7 @@
 ****/
 
 #include "lua/xglua_cl_predict.h"
+#include "lua/xglua_weapon_anim.h"
 
 // Engine-side callbacks are injected rather than included: this TU stays
 // free of hud.h/vgui so host tests can link it directly.
@@ -174,11 +175,21 @@ static int clswep_GetNextSecondaryFire( lua_State *L )
 static int clswep_SendWeaponAnim( lua_State *L )
 {
 	int seq = (int)luaL_checknumber( L, 2 );
+	bool explicitBody = !lua_isnoneornil( L, 3 );
+	int body = explicitBody ? XGLua_CheckWeaponBody( L, 3 ) : 0;
 	CL_GetActiveSWEPTable( L );
+	if( !explicitBody )
+	{
+		lua_getfield( L, -1, "AnimBody" );
+		if( !lua_isnil( L, -1 ) ) body = XGLua_CheckWeaponBody( L, -1 );
+		lua_pop( L, 1 );
+	}
 	lua_pushinteger( L, seq );
 	lua_setfield( L, -2, "AnimSeq" );
+	lua_pushinteger( L, body );
+	lua_setfield( L, -2, "AnimBody" );
 	lua_pop( L, 1 );
-	HUD_SendWeaponAnim( seq, 0, 1 );
+	HUD_SendWeaponAnim( seq, body, 1 );
 	return 0;
 }
 

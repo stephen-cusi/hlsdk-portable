@@ -1,0 +1,6 @@
+"deathmatch"
+{
+    "base" "base"
+    "title" "Half-Life Deathmatch"
+    "rules" "multiplayer"
+}

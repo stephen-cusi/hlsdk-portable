@@ -46,6 +46,26 @@ HUD_AddEntity
 */
 int DLLEXPORT HUD_AddEntity( int type, struct cl_entity_s *ent, const char *modelname )
 {
+	// Aim-follow sprites retain the server state for remote observers. For the
+	// local owner trace every rendered frame from the rendered camera instead
+	// of interpolating a low-rate networked point.
+	cl_entity_t *local = gEngfuncs.GetLocalPlayer();
+	if( type == ET_NORMAL && ent && local && ent->curstate.body == 237 &&
+		ent->curstate.owner == local->index && gEngfuncs.pEventAPI )
+	{
+		vec3_t angles, forward, right, up, end;
+		gEngfuncs.GetViewAngles( angles );
+		AngleVectors( angles, forward, right, up );
+		VectorMA( v_origin, 8192, forward, end );
+		pmtrace_t tr;
+		gEngfuncs.pEventAPI->EV_SetUpPlayerPrediction( false, true );
+		gEngfuncs.pEventAPI->EV_PushPMStates();
+		gEngfuncs.pEventAPI->EV_SetSolidPlayers( local->index - 1 );
+		gEngfuncs.pEventAPI->EV_SetTraceHull( 2 );
+		gEngfuncs.pEventAPI->EV_PlayerTrace( v_origin, end, PM_NORMAL, -1, &tr );
+		gEngfuncs.pEventAPI->EV_PopPMStates();
+		VectorCopy( tr.endpos, ent->origin );
+	}
 	switch( type )
 	{
 	case ET_NORMAL:
