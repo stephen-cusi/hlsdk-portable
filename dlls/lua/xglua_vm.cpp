@@ -13,6 +13,18 @@
 #include <ctime>
 #include <string>
 #include <vector>
+#include <algorithm>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#endif
 
 #include "xglua.h"
 #include "xglua_safe.h"
@@ -103,60 +115,107 @@ void XGLua_LoadScript( lua_State *L, const char *relpath )
     XGLua_LoadScriptChecked( L, relpath );
 }
 
+static bool XGLua_EndsWithLua( const char *name )
+{
+	if( !name ) return false;
+	size_t len = strlen( name );
+	if( len <= 4 ) return false;
+	const char *ext = name + len - 4;
+	return ext[0] == '.' &&
+		( ext[1] == 'l' || ext[1] == 'L' ) &&
+		( ext[2] == 'u' || ext[2] == 'U' ) &&
+		( ext[3] == 'a' || ext[3] == 'A' );
+}
+
 static void XGLua_LoadFolder( lua_State *L, const char *relfolder, bool recursive, const char *presetGlobal = NULL )
 {
-	// scan <gamedir>/lua/<relfolder>/*.lua (alphabetical on NTFS)
 	char szDir[512];
 	snprintf( szDir, sizeof( szDir ), "%s/lua/%s/", g_szGameDir, relfolder );
 
-	char szMask[600];
-	snprintf( szMask, sizeof( szMask ), "%s*.lua", szDir );
+	std::vector<std::string> luaFiles;
+	std::vector<std::string> subDirs;
 
+#ifdef _WIN32
+	char szMask[600];
+	snprintf( szMask, sizeof( szMask ), "%s*", szDir );
 	WIN32_FIND_DATAA fd;
 	HANDLE h = FindFirstFileA( szMask, &fd );
 	if( h != INVALID_HANDLE_VALUE )
 	{
 		do
 		{
-			char szRel[512];
-			if( relfolder[0] )
-				snprintf( szRel, sizeof( szRel ), "%s/%s", relfolder, fd.cFileName );
-			else
-				snprintf( szRel, sizeof( szRel ), "%s", fd.cFileName );
-
-			if( presetGlobal )
+			if( fd.cFileName[0] == '.' )
+				continue;
+			if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
 			{
-				lua_newtable( L );
-				lua_setglobal( L, presetGlobal );	// fresh SWEP table per file (GMod contract)
+				// Do not traverse junctions or directory symlinks.
+				if( !( fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) )
+					subDirs.push_back( fd.cFileName );
 			}
-			XGLua_LoadScript( L, szRel );
+			else if( XGLua_EndsWithLua( fd.cFileName ) )
+				luaFiles.push_back( fd.cFileName );
 		} while( FindNextFileA( h, &fd ) );
 		FindClose( h );
+	}
+#else
+	DIR *dir = opendir( szDir );
+	if( dir )
+	{
+		struct dirent *ent;
+		while( ( ent = readdir( dir ) ) != NULL )
+		{
+			if( ent->d_name[0] == '.' )
+				continue;
+			char fullPath[600];
+			snprintf( fullPath, sizeof( fullPath ), "%s%s", szDir, ent->d_name );
+			struct stat st;
+			if( lstat( fullPath, &st ) != 0 )
+				continue;
+			if( S_ISLNK( st.st_mode ) )
+			{
+				// Permit linked scripts but never recurse through linked directories.
+				if( stat( fullPath, &st ) != 0 || !S_ISREG( st.st_mode ) )
+					continue;
+			}
+			if( S_ISDIR( st.st_mode ) )
+				subDirs.push_back( ent->d_name );
+			else if( S_ISREG( st.st_mode ) && XGLua_EndsWithLua( ent->d_name ) )
+				luaFiles.push_back( ent->d_name );
+		}
+		closedir( dir );
+	}
+#endif
+
+	std::sort( luaFiles.begin(), luaFiles.end() );
+	for( size_t i = 0; i < luaFiles.size(); ++i )
+	{
+		char szRel[512];
+		if( relfolder[0] )
+			snprintf( szRel, sizeof( szRel ), "%s/%s", relfolder, luaFiles[i].c_str() );
+		else
+			snprintf( szRel, sizeof( szRel ), "%s", luaFiles[i].c_str() );
+
+		if( presetGlobal )
+		{
+			lua_newtable( L );
+			lua_setglobal( L, presetGlobal );
+		}
+		XGLua_LoadScript( L, szRel );
 	}
 
 	if( !recursive )
 		return;
 
-	// recurse into subdirectories (autorun/server etc.)
-	snprintf( szMask, sizeof( szMask ), "%s*", szDir );
-	h = FindFirstFileA( szMask, &fd );
-	if( h == INVALID_HANDLE_VALUE )
-		return;
-	do
+	std::sort( subDirs.begin(), subDirs.end() );
+	for( size_t i = 0; i < subDirs.size(); ++i )
 	{
-		if( !( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) )
-			continue;
-		if( fd.cFileName[0] == '.' )
-			continue;
-
 		char szSub[512];
 		if( relfolder[0] )
-			snprintf( szSub, sizeof( szSub ), "%s/%s", relfolder, fd.cFileName );
+			snprintf( szSub, sizeof( szSub ), "%s/%s", relfolder, subDirs[i].c_str() );
 		else
-			snprintf( szSub, sizeof( szSub ), "%s", fd.cFileName );
-		XGLua_LoadFolder( L, szSub, recursive );
-	} while( FindNextFileA( h, &fd ) );
-	FindClose( h );
+			snprintf( szSub, sizeof( szSub ), "%s", subDirs[i].c_str() );
+		XGLua_LoadFolder( L, szSub, recursive, presetGlobal );
+	}
 }
 
 //===========================================================================
@@ -217,44 +276,83 @@ static void XGLua_LoadEntitiesFolder( lua_State *L )
 	char szDir[512];
 	snprintf( szDir, sizeof( szDir ), "%s/lua/entities/", g_szGameDir );
 
+	std::vector<std::string> dirEntries;
+	std::vector<std::string> fileEntries;
+
+#ifdef _WIN32
 	char szMask[600];
 	snprintf( szMask, sizeof( szMask ), "%s*", szDir );
-
 	WIN32_FIND_DATAA fd;
 	HANDLE h = FindFirstFileA( szMask, &fd );
-	if( h == INVALID_HANDLE_VALUE )
-		return;
-
-	do
+	if( h != INVALID_HANDLE_VALUE )
 	{
-		if( fd.cFileName[0] == '.' )
-			continue;
-
-		if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+		do
 		{
-			char szRel[512];
-			snprintf( szRel, sizeof( szRel ), "entities/%s/init.lua", fd.cFileName );
-			XGLua_LoadOneEntityFile( L, szRel, fd.cFileName );
-		}
-		else
-		{
-			size_t len = strlen( fd.cFileName );
-			if( len > 4 && !stricmp( fd.cFileName + len - 4, ".lua" ) )
+			if( fd.cFileName[0] == '.' )
+				continue;
+			if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
 			{
-				char szClass[64];
-				size_t copyLen = len - 4;
-				if( copyLen >= sizeof( szClass ) )
-					copyLen = sizeof( szClass ) - 1;
-				memcpy( szClass, fd.cFileName, copyLen );
-				szClass[copyLen] = '\0';
-
-				char szRel[512];
-				snprintf( szRel, sizeof( szRel ), "entities/%s", fd.cFileName );
-				XGLua_LoadOneEntityFile( L, szRel, szClass );
+				// Do not traverse junctions or directory symlinks.
+				if( !( fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) )
+					dirEntries.push_back( fd.cFileName );
 			}
+			else if( XGLua_EndsWithLua( fd.cFileName ) )
+				fileEntries.push_back( fd.cFileName );
+		} while( FindNextFileA( h, &fd ) );
+		FindClose( h );
+	}
+#else
+	DIR *dir = opendir( szDir );
+	if( dir )
+	{
+		struct dirent *ent;
+		while( ( ent = readdir( dir ) ) != NULL )
+		{
+			if( ent->d_name[0] == '.' )
+				continue;
+			char fullPath[600];
+			snprintf( fullPath, sizeof( fullPath ), "%s%s", szDir, ent->d_name );
+			struct stat st;
+			if( lstat( fullPath, &st ) != 0 )
+				continue;
+			if( S_ISLNK( st.st_mode ) )
+			{
+				// Permit linked scripts but never recurse through linked directories.
+				if( stat( fullPath, &st ) != 0 || !S_ISREG( st.st_mode ) )
+					continue;
+			}
+			if( S_ISDIR( st.st_mode ) )
+				dirEntries.push_back( ent->d_name );
+			else if( S_ISREG( st.st_mode ) && XGLua_EndsWithLua( ent->d_name ) )
+				fileEntries.push_back( ent->d_name );
 		}
-	} while( FindNextFileA( h, &fd ) );
-	FindClose( h );
+		closedir( dir );
+	}
+#endif
+
+	std::sort( dirEntries.begin(), dirEntries.end() );
+	for( size_t i = 0; i < dirEntries.size(); ++i )
+	{
+		char szRel[512];
+		snprintf( szRel, sizeof( szRel ), "entities/%s/init.lua", dirEntries[i].c_str() );
+		XGLua_LoadOneEntityFile( L, szRel, dirEntries[i].c_str() );
+	}
+
+	std::sort( fileEntries.begin(), fileEntries.end() );
+	for( size_t i = 0; i < fileEntries.size(); ++i )
+	{
+		const std::string &fn = fileEntries[i];
+		char szClass[64];
+		size_t copyLen = fn.size() - 4;
+		if( copyLen >= sizeof( szClass ) )
+			copyLen = sizeof( szClass ) - 1;
+		memcpy( szClass, fn.c_str(), copyLen );
+		szClass[copyLen] = '\0';
+
+		char szRel[512];
+		snprintf( szRel, sizeof( szRel ), "entities/%s", fn.c_str() );
+		XGLua_LoadOneEntityFile( L, szRel, szClass );
+	}
 }
 
 //===========================================================================
@@ -544,14 +642,31 @@ void XGLua_Startup( void )
 
 	const char *szExeDir = NULL;
 	char szExe[512];
-	if( GetModuleFileNameA( NULL, szExe, sizeof( szExe ) ) )
+	bool exePathReady = false;
+#ifdef _WIN32
+	DWORD exeLen = GetModuleFileNameA( NULL, szExe, sizeof( szExe ) );
+	exePathReady = exeLen > 0 && exeLen < sizeof( szExe );
+#elif defined( __APPLE__ )
+	uint32_t exeSize = sizeof( szExe );
+	exePathReady = _NSGetExecutablePath( szExe, &exeSize ) == 0;
+#elif defined( __linux__ )
+	ssize_t exeLen = readlink( "/proc/self/exe", szExe, sizeof( szExe ) - 1 );
+	if( exeLen > 0 && (size_t)exeLen < sizeof( szExe ) - 1 )
+	{
+		szExe[exeLen] = '\0';
+		exePathReady = true;
+	}
+#endif
+	if( exePathReady )
 	{
 		char *pLast = strrchr( szExe, '\\' );
 		if( !pLast )
 			pLast = strrchr( szExe, '/' );
 		if( pLast )
+		{
 			*pLast = '\0';
-		szExeDir = szExe;
+			szExeDir = szExe;
+		}
 	}
 
 	for( int attempt = 0; attempt < 4 && !szChosen; attempt++ )

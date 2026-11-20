@@ -43,3 +43,5 @@ local.properties
 #Finder cache
 .DS_Store
 *.log
+
+/build-migrated/
