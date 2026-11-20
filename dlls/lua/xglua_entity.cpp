@@ -12,6 +12,7 @@
 
 #include "xglua.h"
 #include "xglua_safe.h"
+#include "xglua_vm_include.h" // XGLua_IncludePath / XGLUA_INCLUDE_PATH_MAX
 #include "weapons.h"
 #include "player.h"
 #include "enginecallback.h"
@@ -516,6 +517,32 @@ static int util_ThrowGrenade( lua_State *L )
 // registration
 //===========================================================================
 
+static int XGLua_file_Exists( lua_State *L )
+{
+	const char *raw = luaL_checkstring( L, 1 );
+	char clean[XGLUA_INCLUDE_PATH_MAX];
+	if( !XGLua_IncludePath( NULL, raw, std::strlen( raw ), clean, sizeof( clean ) ) )
+	{
+		lua_pushboolean( L, 0 );
+		return 1;
+	}
+	bool exists = false;
+	if( g_engfuncs.pfnGetFileSize )
+		exists = g_engfuncs.pfnGetFileSize( clean ) > 0;
+	else if( g_engfuncs.pfnLoadFileForMe && g_engfuncs.pfnFreeFile )
+	{
+		int len = 0;
+		byte *data = LOAD_FILE_FOR_ME( clean, &len );
+		if( data )
+		{
+			exists = len > 0;
+			FREE_FILE( data );
+		}
+	}
+	lua_pushboolean( L, exists ? 1 : 0 );
+	return 1;
+}
+
 void XGLua_RegisterEntityLibs( lua_State *L )
 {
 	extern void XGLua_RegisterTypes( lua_State *L );
@@ -675,4 +702,11 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 	// IsValid global
 	lua_pushcfunction( L, Ent_IsValid );
 	lua_setglobal( L, "IsValid" );
+
+	// file.Exists(relpath) — resource existence probe relative to the game
+	// directory (used by addons to self-check optional model/sound assets)
+	lua_newtable( L );
+	lua_pushcfunction( L, XGLua_file_Exists );
+	lua_setfield( L, -2, "Exists" );
+	lua_setglobal( L, "file" );
 }

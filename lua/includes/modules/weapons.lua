@@ -86,11 +86,139 @@ function WeaponBase:CanPrimaryAttack()
     return false
 end
 
+
+-- Computes visual bodygroup for a given clip count via optional SWEP:BodyFromClip(clip).
+function WeaponBase:GetBodyForClip( clip )
+	if type( self.BodyFromClip ) == "function" then
+		local b = tonumber( self:BodyFromClip( clip ) ) or 0
+		b = math.floor( b )
+		if b < 0 then return 0 end
+		if b > 255 then return 255 end
+		return b
+	end
+	if type( self.GetBody ) == "function" then
+		return self:GetBody() or 0
+	end
+	return 0
+end
+
+function WeaponBase:UpdateBodyFromClip()
+	local body = self:GetBodyForClip( self:Clip1() )
+	if type( self.SetBody ) == "function" then
+		self:SetBody( body )
+	end
+	return body
+end
+
+-- Starts a two-phase / three-stage reload (e.g. M249 open cover -> fill belt -> close cover).
+-- cfg = { OpenAnim, OpenDelay, CloseAnim, CloseDelay }
+function WeaponBase:StartSpecialReload( cfg )
+	cfg = cfg or self.SpecialReload
+	if type( cfg ) ~= "table" then return false end
+	if ( self._SpecialReloadStage or 0 ) > 0 or self:IsReloading() then
+		return false
+	end
+
+	local maxClip = self:GetMaxClip1()
+	if maxClip <= 0 or self:Clip1() >= maxClip or self:Ammo1() <= 0 then
+		return false
+	end
+
+	local openAnim  = cfg.OpenAnim or 0
+	local openDelay = cfg.OpenDelay or 1.0
+	local body      = self:GetBodyForClip( self:Clip1() )
+
+	if not self:DefaultReload( maxClip, openAnim, openDelay, body ) then
+		return false
+	end
+
+	self._SpecialReloadStage = 1
+	self._SpecialReloadCfg   = cfg
+	self._SpecialReloadUntil = 0
+	return true
+end
+
+-- Advances active special reload stages; returns true while reload owns animation/state.
+function WeaponBase:ThinkSpecialReload()
+	local stage = self._SpecialReloadStage or 0
+	if stage == 0 then
+		return false
+	end
+
+	if stage == 1 then
+		-- Wait until C++ ItemPostFrame finishes the timed clip refill.
+		if self:IsReloading() then
+			return true
+		end
+
+		local cfg        = self._SpecialReloadCfg or {}
+		local body       = self:UpdateBodyFromClip()
+		local closeAnim  = cfg.CloseAnim
+		local closeDelay = cfg.CloseDelay or 0
+
+		if type( self.OnReloadClipFilled ) == "function" then
+			self:OnReloadClipFilled( body )
+		end
+
+		if closeAnim ~= nil and closeDelay > 0 then
+			self:SendWeaponAnim( closeAnim, body )
+			local readyAt = CurTime() + closeDelay
+			self:SetNextPrimaryFire( readyAt )
+			self:SetNextSecondaryFire( readyAt )
+			if type( self.SetNextAttack ) == "function" then
+				self:SetNextAttack( closeDelay )
+			end
+			if type( self.SetWeaponIdleTime ) == "function" then
+				self:SetWeaponIdleTime( readyAt )
+			end
+			self._SpecialReloadStage = 2
+			self._SpecialReloadUntil = readyAt
+			return true
+		end
+
+		self._SpecialReloadStage = 0
+		self._SpecialReloadCfg   = nil
+		if type( self.OnReloadComplete ) == "function" then
+			self:OnReloadComplete()
+		end
+		return false
+	end
+
+	if stage == 2 then
+		if CurTime() < ( self._SpecialReloadUntil or 0 ) then
+			return true
+		end
+		self._SpecialReloadStage = 0
+		self._SpecialReloadCfg   = nil
+		self._SpecialReloadUntil = 0
+		if type( self.OnReloadComplete ) == "function" then
+			self:OnReloadComplete()
+		end
+		return false
+	end
+
+	self._SpecialReloadStage = 0
+	return false
+end
+
+function WeaponBase:Holster()
+	self._SpecialReloadStage = 0
+	self._SpecialReloadCfg   = nil
+	self._SpecialReloadUntil = 0
+end
+
 -- The native helper starts a timed reload and transfers ammo when it finishes.
 function WeaponBase:Reload()
-    local clipSize = self:GetMaxClip1()
-    if clipSize <= 0 then return false end
-    return self:DefaultReload(clipSize, self.ReloadAnimation or 0, self.ReloadTime or 2)
+	if self:ThinkSpecialReload() then
+		return false
+	end
+	if type( self.SpecialReload ) == "table" then
+		return self:StartSpecialReload( self.SpecialReload )
+	end
+	local clipSize = self:GetMaxClip1()
+	if clipSize <= 0 then return false end
+	local body = self:GetBodyForClip( self:Clip1() )
+	return self:DefaultReload(clipSize, self.ReloadAnimation or 0, self.ReloadTime or 2, body)
 end
 
 StoredWeapons.weapon_base = WeaponBase
@@ -185,6 +313,9 @@ end
 -- Default idle cadence with occasional longidle/fidget insertion (GMod style).
 -- Weapons can override IdleSeq / LongIdleSeq / LongIdleEvery / IdleMinDelay / IdleMaxDelay.
 function WeaponBase:WeaponIdle()
+	if self:ThinkSpecialReload() then
+		return
+	end
 	if CurTime() < ( self._NextIdleTime or 0 ) then
 		return
 	end
