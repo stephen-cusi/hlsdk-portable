@@ -1,0 +1,13 @@
+12
+ammo            320 xgm40a320 18 16 18 18
+zoom            320 xgm40scope 0 0 256 256
+crosshair       320 xgm40cross 0 48 24 24
+autoaim         320 xgm40auto 24 72 24 24
+weapon          320 xgm40w320 80 120 80 20
+weapon_s        320 xgm40w320 80 140 80 20
+ammo            640 xgm40a640 24 72 24 24
+zoom            640 xgm40scope 0 0 256 256
+crosshair       640 xgm40cross 0 48 24 24
+autoaim         640 xgm40auto 24 72 24 24
+weapon          640 xgm40w640 0 135 170 45
+weapon_s        640 xgm40s640 0 135 170 45

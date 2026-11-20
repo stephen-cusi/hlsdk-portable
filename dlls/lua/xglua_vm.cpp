@@ -357,6 +357,30 @@ static void XGLua_LoadEntitiesFolder( lua_State *L )
 	}
 }
 
+// Addon entity files use the same ENT auto-registration convention as lua/entities.
+static void XGLua_LoadAddonEntities( lua_State *L )
+{
+    std::vector<std::string> files;
+    XGLua_FindAddonEntities( g_szGameDir, files );
+    for( size_t i = 0; i < files.size(); ++i )
+    {
+        const std::string &path = files[i];
+        size_t slash = path.find_last_of( '/' );
+        std::string classname = path.substr( slash + 1, path.size() - slash - 5 );
+        if( classname.size() >= 64 ) { ALERT( at_console, "[XGLua] addon entity classname too long: %s\n", classname.c_str() ); continue; }
+        lua_newtable( L ); lua_setglobal( L, "ENT" );
+        int top = lua_gettop( L );
+        int status = XGLua_ExecuteScript( L, path.c_str(), XGLua_ReadEngineRoot, g_szGameDir, 0 );
+        if( status == XGLUA_READ_OK )
+        {
+            XGLua_AutoRegEntCtx ctx = { classname.c_str() };
+            XGLua_ProtectedCall( L, XGLua_AutoRegisterEntityCore, &ctx, XGLua_ReportError, path.c_str() );
+        }
+        else XGLua_ReportError( L, path.c_str() );
+        lua_settop( L, top ); lua_pushnil( L ); lua_setglobal( L, "ENT" );
+    }
+}
+
 //===========================================================================
 // base globals
 //===========================================================================
@@ -403,6 +427,24 @@ static int XGLua_include( lua_State *L )
 	const int n = XGLua_IncludeImpl( L, XGLua_ReadEngineScript, g_szGameDir );
 	if( n < 0 ) return lua_error( L );
 	return n;
+}
+
+// Load a file inside one loose addon; normalize paths before using the VFS.
+static int XGLua_includeAddon( lua_State *L )
+{
+ size_t nameLen=0, pathLen=0;
+ const char *name=luaL_checklstring(L,1,&nameLen);
+ const char *path=luaL_checklstring(L,2,&pathLen);
+ if( nameLen != strlen(name) || !XGLua_AddonComponent(name) )
+  return luaL_argerror(L,1,"invalid addon name");
+ char relative[XGLUA_INCLUDE_PATH_MAX], full[768];
+ if( !XGLua_IncludePath(NULL,path,pathLen,relative,sizeof(relative)) )
+  return luaL_argerror(L,2,"invalid addon path");
+ int n=snprintf(full,sizeof(full),"addons/%s/lua/%s",name,relative);
+ if( n<0 || (size_t)n>=sizeof(full) ) return luaL_error(L,"addon path too long");
+ int top=lua_gettop(L);
+ if( XGLua_ExecuteScript(L,full,XGLua_ReadEngineRoot,g_szGameDir,LUA_MULTRET)!=XGLUA_READ_OK ) return lua_error(L);
+ return lua_gettop(L)-top;
 }
 
 //===========================================================================
@@ -761,6 +803,7 @@ void XGLua_Startup( void )
 		{ "RealTime", XGLua_RealTime },
 		{ "FrameTime", XGLua_FrameTime },
 		{ "include", XGLua_include },
+		{ "includeAddon", XGLua_includeAddon },
 		{ NULL, NULL }
 	};
 	for( const luaL_Reg *f = baseglobals; f->name; f++ )
@@ -839,6 +882,7 @@ void XGLua_Startup( void )
 
 	// 5. scripted entities — single files and <name>/init.lua folders
 	XGLua_LoadEntitiesFolder( L );
+	XGLua_LoadAddonEntities( L );
 	XGLua_BuildEntityCache( L );
 	XGLua_LoadFolder( L, "npcs", false, "NPC" );
 	XGLua_BuildNPCCache( L );

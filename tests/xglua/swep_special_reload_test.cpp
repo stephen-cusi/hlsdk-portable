@@ -17,15 +17,6 @@ static int g_animCalls = 0;
 
 static int stub_CurTime( lua_State *L )
 {
-	// Simulate C++ ItemPostFrame completing reload when timer expires
-	if( g_inReload && g_now >= g_reloadEnd )
-	{
-		int need = 50 - g_clip;
-		int take = need < g_reserve ? need : g_reserve;
-		g_clip += take;
-		g_reserve -= take;
-		g_inReload = false;
-	}
 	lua_pushnumber( L, g_now );
 	return 1;
 }
@@ -55,7 +46,7 @@ static bool SetupReloadTest( lua_State *L )
 		"}\n"
 		"local M249 = {\n"
 		"  Primary = { ClipSize = 50, DefaultClip = 50, Ammo = '556', Automatic = true },\n"
-		"  SpecialReload = { OpenAnim = 3, OpenDelay = 1.33, CloseAnim = 4, CloseDelay = 1.0 },\n"
+		"  SpecialReload = { OpenAnim = 3, OpenDelay = 1.33, CloseAnim = 4, CloseDelay = 2.4 },\n"
 		"  IdleSeq = 0,\n"
 		"  BodyFromClip = function( self, clip )\n"
 		"    if clip <= 0 then return 8 end\n"
@@ -135,32 +126,39 @@ TEST(BodyFromClip_and_three_stage_reload_flow)
 	CHECK_LUA_BOOL( "Retrigger", false, "Reload does not re-enter during Stage 1" );
 	CHECK_EQ_INT( g_animCalls, 1, "No duplicate animation emitted mid-Stage 1" );
 
-	// Stage 1 expires at 11.33 -> clip refilled to 50, Stage 2 plays CloseAnim (4) with body 0
+	// Stage 1 expires: preview the belt, but do not transfer ammo yet.
 	g_now = 11.35;
-	LUA( "Wep:WeaponIdle()" );
-	CHECK_EQ_INT( g_clip, 50, "Clip refilled to 50" );
-	CHECK_EQ_INT( g_reserve, 150, "Reserve deducted by 50" );
+	LUA( "Wep:AdvanceSpecialReload()" );
+	CHECK_EQ_INT( g_clip, 0, "Clip unchanged during closing" );
+	CHECK_EQ_INT( g_reserve, 200, "Reserve unchanged during closing" );
 	CHECK_EQ_INT( g_body, 0, "Belt body updated to 0 (full)" );
 	CHECK_EQ_INT( g_lastAnim, 4, "Stage 2 plays CloseAnim (4)" );
 	CHECK_EQ_INT( g_lastAnimBody, 0, "Stage 2 uses updated full belt body (0)" );
 
-	// During Stage 2 (before 12.35), WeaponIdle must not interrupt CloseAnim with IdleSeq (0)
-	g_now = 11.80;
+	// During Stage 2 (before 13.75), WeaponIdle must not interrupt CloseAnim with IdleSeq (0)
+	g_now = 12.80;
 	LUA( "Wep:WeaponIdle()" );
 	CHECK_EQ_INT( g_lastAnim, 4, "Idle suppressed while Stage 2 close animation plays" );
 
-	// Stage 2 completes at 12.35 -> OnReloadComplete fires and normal idle resumes
-	g_now = 12.40;
-	LUA( "Wep:WeaponIdle()" );
+	// Stage 2 completes at 13.75 -> OnReloadComplete fires and normal idle resumes
+	g_now = 13.80;
+	// Simulate native ItemPostFrame committing the clip after the close phase.
+	g_clip = 50; g_reserve = 150; g_inReload = false;
+	LUA( "Wep:ThinkSpecialReload(); Wep:WeaponIdle()" );
 	CHECK_LUA_INT( "ReloadDoneCount", 1, "OnReloadComplete fired once" );
 	CHECK_EQ_INT( g_lastAnim, 0, "Normal IdleSeq resumes after Stage 2" );
 }
 
 TEST(Holster_resets_special_reload_stage)
 {
-	g_now = 20.0; g_clip = 10; g_reserve = 100; g_inReload = false;
-	LUA( "Wep:Reload(); Wep:Holster()" );
+	g_now = 20.0; g_clip = 5; g_reserve = 100; g_inReload = false;
+	LUA( "Wep:Reload(); Wep:AdvanceSpecialReload()" );
+	CHECK_EQ_INT( g_body, 0, "Preview shows the loaded belt" );
+	LUA( "Wep:Holster()" );
 	CHECK_LUA_INT( "Wep._SpecialReloadStage", 0, "Holster clears _SpecialReloadStage" );
+	CHECK_EQ_INT( g_body, 4, "Body reflects the unchanged 5-round clip" );
+	CHECK_EQ_INT( g_clip, 5, "Holstering does not fill the clip" );
+	CHECK_EQ_INT( g_reserve, 100, "Holstering does not consume reserve" );
 }
 
 int main()

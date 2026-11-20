@@ -19,6 +19,7 @@
 #include "lua/xglua_weapon_anim.h"
 #include "xglua_swep_bridge.h"
 #include "xglua_attack_time.h"
+#include "xglua_auto_reload.h"
 #include "xglua_swep_order.h"
 #include "xglua_restore_map.h"
 #include "xglua_restore_inventory.h"
@@ -469,6 +470,10 @@ void CLuaWeapon::ItemPostFrame( void )
 	XGLuaSWEPInfo *swep = XGLua_FindSWEP( m_szLuaClass );
 	if( !swep ) return;
 
+	// Like GMod WEAPON:Think, run while the weapon is active and not reloading.
+	CallWeaponMethod( this, "Think" );
+	if( m_pPlayer->m_flNextAttack > UTIL_WeaponTimeBase() ) return;
+
 	// Complete staged reload bookkeeping before dispatching held inputs.
 	CallWeaponMethod( this, "ThinkSpecialReload" );
 	if( m_pPlayer->m_flNextAttack > UTIL_WeaponTimeBase() ) return;
@@ -495,6 +500,14 @@ void CLuaWeapon::ItemPostFrame( void )
 	else if( !( buttons & ( IN_ATTACK | IN_ATTACK2 ) ) )
 	{
 		ResetEmptySound();
+		const int reserve = ( m_iPrimaryAmmoType > 0 && m_iPrimaryAmmoType < MAX_AMMO_SLOTS ) ?
+			m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] : 0;
+		if( XGLua_ShouldAutoReload( m_iClip, iMaxClip(), reserve,
+			( iFlags() & ITEM_FLAG_NOAUTORELOAD ) != 0, gpGlobals->time, m_flNextPrimaryAttack ) )
+		{
+			Reload();
+			return;
+		}
 		WeaponIdle();
 	}
 }
@@ -753,6 +766,44 @@ static int Wep_ShootBullet( lua_State *L )
 	return 0;
 }
 
+// GoldSrc line-then-hull melee trace. Returns a small result table so Lua
+// owns animation/sound choices while the engine retains hitgroup semantics.
+extern void FindHullIntersection( const Vector &, TraceResult &, float *, float *, edict_t * );
+static int Wep_TraceMeleeAttack( lua_State *L )
+{
+ CLuaWeapon *w=WeaponFromLua(L,1);
+ double range=luaL_checknumber(L,2), damage=luaL_checknumber(L,3);
+ if( !std::isfinite(range) || range<=0 || range>128 ) return luaL_argerror(L,2,"range must be between 0 and 128");
+ if( !std::isfinite(damage) || damage<0 || damage>1000 ) return luaL_argerror(L,3,"damage must be between 0 and 1000");
+ CBasePlayer *p=w->m_pPlayer;
+ if( !p ) return luaL_error(L,"TraceMeleeAttack requires a player-owned weapon");
+ UTIL_MakeVectors(p->pev->v_angle);
+ Vector start=p->GetGunPosition(), end=start+gpGlobals->v_forward*(float)range;
+ TraceResult tr; UTIL_TraceLine(start,end,dont_ignore_monsters,p->edict(),&tr);
+ if( tr.flFraction>=1.0f )
+ {
+  UTIL_TraceHull(start,end,dont_ignore_monsters,head_hull,p->edict(),&tr);
+  if( tr.flFraction<1.0f )
+  {
+   CBaseEntity *target=CBaseEntity::Instance(tr.pHit);
+   if( !target || target->IsBSPModel() ) FindHullIntersection(start,tr,VEC_DUCK_HULL_MIN,VEC_DUCK_HULL_MAX,p->edict());
+  }
+ }
+ bool hit=tr.flFraction<1.0f;
+ CBaseEntity *target=hit && tr.pHit ? CBaseEntity::Instance(tr.pHit) : NULL;
+ bool flesh=target && target->Classify()!=CLASS_NONE && target->Classify()!=CLASS_MACHINE;
+ if( hit && target )
+ {
+  if( !flesh ) { TEXTURETYPE_PlaySound(&tr,start,start+(tr.vecEndPos-start)*2,BULLET_PLAYER_CROWBAR); DecalGunshot(&tr,BULLET_PLAYER_CROWBAR); }
+  ClearMultiDamage(); target->TraceAttack(p->pev,(float)damage,gpGlobals->v_forward,&tr,DMG_CLUB); ApplyMultiDamage(p->pev,p->pev);
+ }
+ lua_newtable(L);
+ lua_pushboolean(L,hit); lua_setfield(L,-2,"Hit");
+ lua_pushboolean(L,flesh); lua_setfield(L,-2,"HitFlesh");
+ XGLua_PushVector(L,tr.vecEndPos); lua_setfield(L,-2,"HitPos");
+ return 1;
+}
+
 static int Wep_SendWeaponAnim( lua_State *L )
 {
 	CLuaWeapon *w = WeaponFromLua( L, 1 );
@@ -879,6 +930,7 @@ void XGLua_RegisterWeaponLibs( lua_State *L )
 			{ "MuzzleFlash", Wep_MuzzleFlash },
 			{ "SendOwnerAttackAnimation", Wep_SendOwnerAttackAnimation },
 			{ "ShootBullet", Wep_ShootBullet },
+			{ "TraceMeleeAttack", Wep_TraceMeleeAttack },
 			{ "DefaultReload", Wep_DefaultReload },
 			{ "SendWeaponAnim", Wep_SendWeaponAnim },
 			{ "PlayEmptySound", Wep_PlayEmptySound },

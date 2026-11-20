@@ -1,18 +1,8 @@
 -- addons/opfor_m249/lua/weapons/weapon_m249.lua
 -- Opposing Force M249 Squad Automatic Weapon (independent server-authoritative addon)
 
-local REQUIRED_ASSETS = {
-	"models/v_saw.mdl",
-	"models/w_saw.mdl",
-	"models/p_saw.mdl",
-	"models/saw_shell.mdl",
-	"models/saw_link.mdl",
-	"sound/weapons/saw_fire1.wav",
-	"sound/weapons/saw_fire2.wav",
-	"sound/weapons/saw_fire3.wav",
-	"sound/weapons/saw_reload.wav",
-	"sound/weapons/saw_reload2.wav"
-}
+local cfg = includeAddon("opfor_m249", "config.lua")
+local REQUIRED_ASSETS = cfg.Required
 
 for _, assetPath in ipairs( REQUIRED_ASSETS ) do
 	if not file.Exists( assetPath ) then
@@ -23,38 +13,9 @@ end
 
 -- Register standalone 5.56mm belt ammo type (GMod style)
 game.AddAmmoType( {
-	name     = "556",
-	maxcarry = 200
+	name     = cfg.Weapon.Primary.Ammo,
+	maxcarry = cfg.Weapon.Primary.MaxAmmo
 } )
-
--- The pickup lives in the same addon as the weapon. The current addon loader
--- discovers weapon scripts before the scripted-entity cache is built.
-if file.Exists( "models/w_saw_clip.mdl" ) and file.Exists( "sound/items/xgm249_ammo.wav" ) then
-    local ammo = {
-        Type = "anim", Base = "base_entity", PrintName = "M249 5.56mm belt",
-        Spawnable = true, Model = "models/w_saw_clip.mdl",
-        PrecacheSounds = { "items/xgm249_ammo.wav" }
-    }
-    function ammo:Initialize()
-        self:SetModel( self.Model )
-        self:SetMoveType( MOVETYPE_TOSS )
-        self:SetSolid( SOLID_TRIGGER )
-        self:SetCollisionBounds( Vector( -16, -16, 0 ), Vector( 16, 16, 16 ) )
-    end
-    function ammo:Touch( other )
-        if not IsValid( other ) or not other:IsPlayer() then return end
-        local before = other:GetAmmoCount( "556" )
-        if before >= 200 then return end
-        other:GiveAmmo( 50, "556", 200 )
-        if other:GetAmmoCount( "556" ) > before then
-            self:EmitSound( "items/xgm249_ammo.wav" )
-            self:Remove()
-        end
-    end
-    scripted_ents.Register( ammo, "xgl_ammo_556" )
-else
-    print( "[XGLua] xgl_ammo_556: missing addon pickup model or sound; pickup disabled" )
-end
 
 -- Sequence table verified from gearbox/models/v_saw.mdl (activity=0 on all sequences)
 local SEQ_SLOWIDLE = 0
@@ -67,60 +28,14 @@ local SEQ_SHOOT1   = 6
 local SEQ_SHOOT2   = 7
 local SEQ_SHOOT3   = 8
 
-local CONE_6DEG = Vector( 0.05234, 0.05234, 0 )
-local CONE_3DEG = Vector( 0.02618, 0.02618, 0 )
+local CONE_6DEG = Vector( cfg.SpreadSingle, cfg.SpreadSingle, 0 )
+local CONE_3DEG = Vector( cfg.SpreadMulti, cfg.SpreadMulti, 0 )
 
-local FIRE_SOUNDS = {
-	"weapons/saw_fire1.wav",
-	"weapons/saw_fire2.wav",
-	"weapons/saw_fire3.wav"
-}
-
-SWEP.PrintName      = "M249 SAW"
-SWEP.ViewModel      = "models/v_saw.mdl"
-SWEP.WorldModel     = "models/w_saw.mdl"
-SWEP.PlayerModel    = "models/p_saw.mdl"
-SWEP.DeploySequence = SEQ_DRAW
-SWEP.AnimExtension  = "mp5"
-
-SWEP.Slot           = 2
-SWEP.SlotPos        = 2
-SWEP.Weight         = 15
-
-SWEP.Primary = {
-	ClipSize    = 50,
-	DefaultClip = 50,
-	MaxAmmo     = 200,
-	Ammo        = "556",
-	Automatic   = true
-}
-
-SWEP.Secondary = {
-	ClipSize  = -1,
-	Ammo      = "none",
-	Automatic = false
-}
-
-SWEP.PrecacheModels = {
-	"models/saw_shell.mdl",
-	"models/saw_link.mdl"
-}
-
-SWEP.PrecacheSounds = {
-	"weapons/saw_fire1.wav",
-	"weapons/saw_fire2.wav",
-	"weapons/saw_fire3.wav",
-	"weapons/saw_reload.wav",
-	"weapons/saw_reload2.wav"
-}
-
--- Two-stage belt-fed reload driven by WeaponBase:ThinkSpecialReload
-SWEP.SpecialReload = {
-	OpenAnim   = SEQ_LAUNCH,
-	OpenDelay  = 1.33,
-	CloseAnim  = SEQ_RELOAD1,
-	CloseDelay = 2.4
-}
+local FIRE_SOUNDS = cfg.Sounds.Fire
+for key, value in pairs(cfg.Weapon) do SWEP[key] = value end
+SWEP.PrecacheModels = {cfg.Models.Shell, cfg.Models.Link}
+SWEP.PrecacheSounds = cfg.Sounds.Precache
+SWEP.SpecialReload = cfg.Reload
 
 SWEP.IdleSeq       = SEQ_SLOWIDLE
 SWEP.LongIdleSeq   = SEQ_IDLE2
@@ -171,14 +86,14 @@ function SWEP:PrimaryAttack()
 	-- Match Opposing Force: six degrees in campaign, three in multiplayer.
 	local spread = game.SinglePlayer() and CONE_6DEG or CONE_3DEG
 	-- Default skillopfor.cfg value; dynamic skill cvars are not wired up yet.
-	self:ShootBullet( 15, 1, spread )
+	self:ShootBullet( cfg.Damage, 1, spread )
 
 	-- Alternating shell ejection (right vs left/upward kick matching m249.cpp)
 	self._AltEject = not self._AltEject
 	if self._AltEject then
-		self:EjectBrass( "models/saw_link.mdl", math.random( 90, 120 ), math.random( 90, 120 ), 18, 8, -6 )
+		self:EjectBrass( cfg.Models.Link, math.random( 90, 120 ), math.random( 90, 120 ), 18, 8, -6 )
 	else
-		self:EjectBrass( "models/saw_shell.mdl", math.random( -60, -35 ), math.random( 110, 140 ), 18, 4, -5 )
+		self:EjectBrass( cfg.Models.Shell, math.random( -60, -35 ), math.random( 110, 140 ), 18, 4, -5 )
 	end
 
 	-- Overwrite punchangle + incremental horizontal pushback (matching m249.cpp)
@@ -193,7 +108,7 @@ function SWEP:PrimaryAttack()
 	end
 
 	-- The bridge converts the engine weapon clock to an absolute SWEP deadline.
-	self:SetNextAttackDelay( 0.067 )
+	self:SetNextAttackDelay( cfg.FireDelay )
 	self:SetWeaponIdleTime( CurTime() + 0.5 )
 end
 

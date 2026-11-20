@@ -683,6 +683,7 @@ void XGLua_RegisterEntityLibs( lua_State *L )
 		{ "Alive", Ply_Alive },
 		{ "IsObserver", Ply_IsObserver },
 		{ "GetFOV", Ply_GetFOV },
+		{ "SetFOV", Ply_SetFOV },
 		{ "IsOnTrain", Ply_IsOnTrain },
 		{ "IsUsing", Ply_IsUsing },
 		{ "InVehicle", Ply_InVehicle },

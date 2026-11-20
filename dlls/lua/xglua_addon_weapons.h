@@ -75,7 +75,7 @@ inline void XGLua_AddonList( const char *dir, bool directories, std::vector<std:
 #endif
     std::sort( out.begin(), out.end() );
 }
-inline void XGLua_FindAddonWeapons( const char *root, std::vector<std::string> &result )
+inline void XGLua_FindAddonScripts( const char *root, const char *kind, std::vector<std::string> &result )
 {
     char path[1024];
     int n = std::snprintf(path, sizeof(path), "%s/addons", root ? root : "");
@@ -85,14 +85,18 @@ inline void XGLua_FindAddonWeapons( const char *root, std::vector<std::string> &
     for( size_t i=0; i<addons.size(); ++i ) {
         n = std::snprintf(path, sizeof(path), "%s/addons/%s/lua", root, addons[i].c_str());
         if( n < 0 || (size_t)n >= sizeof(path) || !XGLua_AddonRealDirectory(path) ) continue;
-        n = std::snprintf(path, sizeof(path), "%s/addons/%s/lua/weapons", root, addons[i].c_str());
+        n = std::snprintf(path, sizeof(path), "%s/addons/%s/lua/%s", root, addons[i].c_str(), kind);
         if( n < 0 || (size_t)n >= sizeof(path) || !XGLua_AddonRealDirectory(path) ) continue;
         std::vector<std::string> files;
         XGLua_AddonList(path, false, files);
         for( size_t j=0; j<files.size(); ++j ) {
-            std::string rel = "addons/" + addons[i] + "/lua/weapons/" + files[j];
+            std::string rel = "addons/" + addons[i] + "/lua/" + kind + "/" + files[j];
             if( rel.size() < 256 ) result.push_back(rel);
         }
     }
 }
+inline void XGLua_FindAddonWeapons( const char *root, std::vector<std::string> &result )
+{ XGLua_FindAddonScripts( root, "weapons", result ); }
+inline void XGLua_FindAddonEntities( const char *root, std::vector<std::string> &result )
+{ XGLua_FindAddonScripts( root, "entities", result ); }
 #endif

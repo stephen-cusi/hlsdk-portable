@@ -12,7 +12,8 @@ static const int BULLET_PLAYER_9MM=2;
 struct FakePlayer {
  Entvars *pev; int random_seed=123; bool fired=false; ULONG shots=0; Vector start,dir,spread; float distance=0; int type=0,tracer=-1,damage=0,seed=0; Entvars *attacker=nullptr;
  Vector GetGunPosition() { return Vector(3,4,5); }
- void FireBulletsPlayer(ULONG n, Vector s, Vector d, Vector sp, float dist, int t, int tr, int dmg, Entvars *a, int random) {
+ void FireBulletsPlayer(ULONG n, Vector s, Vector d, Vector sp, float dist, int t, int tr, int dmg, Entvars *a, int random, int flags) {
+  assert(flags == 2);
   fired=true; shots=n; start=s; dir=d; spread=sp; distance=dist; type=t; tracer=tr; damage=dmg; attacker=a; seed=random;
   assert(gpGlobals->v_right.x==1 && gpGlobals->v_up.z==1);
  }
@@ -25,7 +26,7 @@ int main() {
  assert(XGLua_ValidBulletSpread(Vector(0.1f,0.2f,0)) && !XGLua_ValidBulletSpread(Vector(1.1f,0,0)));
  Entvars ent; ent.v_angle=Vector(2,3,4); ent.punchangle=Vector(-1,2,0);
  FakePlayer player; player.pev=&ent;
- XGLua_FirePlayerBullets(&player, 7, 5, Vector(.1f,.2f,0));
+ XGLua_FirePlayerBullets(&player, 7, 5, Vector(.1f,.2f,0), 2);
  assert(player.fired && player.shots==5 && player.damage==7 && player.attacker==&ent && player.seed==123);
  assert(basisAngles.x==1 && basisAngles.y==5 && basisAngles.z==4);
  assert(player.start.x==3 && player.start.y==4 && player.start.z==5 && player.dir.y==1);

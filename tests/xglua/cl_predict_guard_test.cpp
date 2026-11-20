@@ -7,9 +7,10 @@
 #include "lua/xglua_cl_predict.h"
 
 // Minimal stubs so standalone host test links cleanly
+static int g_lastAnim = -1, g_lastBody = -1, g_animCalls = 0;
 void HUD_SendWeaponAnim( int iAnim, int body, int force )
 {
-	(void)iAnim; (void)body; (void)force;
+	g_lastAnim = iAnim; g_lastBody = body; ++g_animCalls; (void)force;
 }
 void HUD_PlaySound( const char *szSound, float vol )
 {
@@ -35,7 +36,7 @@ static bool SetupPredictTest( lua_State *L )
 		"  Clip1 = function(self) return api.Clip1(self) end,\n"
 		"  SetClip1 = function(self, n) api.SetClip1(self, n) end,\n"
 		"  SetNextPrimaryFire = function(self, t) api.SetNextPrimaryFire(self, t) end,\n"
-		"  SendWeaponAnim = function(self, s) api.SendWeaponAnim(self, s) end,\n"
+		"  SendWeaponAnim = function(self, s, b) api.SendWeaponAnim(self, s, b) end,\n"
 		"  TakeDamage = function(self, d) api.TakeDamage(self, d) end,\n"
 		"  Remove = function(self) api.Remove(self) end\n"
 		"}";
@@ -61,6 +62,22 @@ TEST(Predict_scope_allows_state_and_blocks_side_effects)
 		CHECK_LUA_ERROR( "ents.Create('monster_barney')", "not allowed inside prediction", "blocks ents.Create during predict" );
 	}
 	CHECK_EQ_BOOL( XGLua_CL_IsPredicting(), false, "predict scope exited cleanly" );
+}
+
+TEST(Predict_animation_body_is_forwarded_and_validated)
+{
+	g_animCalls = 0;
+	LUA( "PredWep:SendWeaponAnim(6, 8)" );
+	CHECK_EQ_INT( g_lastAnim, 6, "animation reaches engine" );
+	CHECK_EQ_INT( g_lastBody, 8, "body reaches engine" );
+	CHECK_LUA_INT( "XGLUA_CL_ActiveSWEP.AnimBody", 8, "body held in active context" );
+	LUA( "PredWep:SendWeaponAnim(7)" );
+	CHECK_EQ_INT( g_lastBody, 8, "omitted body preserves current state" );
+	CHECK_LUA_ERROR( "PredWep:SendWeaponAnim(1, -1)", "body must be an integer", "negative body rejected" );
+	CHECK_LUA_ERROR( "PredWep:SendWeaponAnim(1, 256)", "body must be an integer", "out of range body rejected" );
+	CHECK_LUA_ERROR( "PredWep:SendWeaponAnim(1, 1.5)", "body must be an integer", "fractional body rejected" );
+	CHECK_LUA_ERROR( "PredWep:SendWeaponAnim(1, 0/0)", "body must be an integer", "NaN body rejected" );
+	CHECK_EQ_INT( g_animCalls, 2, "invalid bodies never reach engine" );
 }
 
 int main()

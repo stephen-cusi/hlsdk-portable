@@ -13,4 +13,6 @@
 
 - 当前优先 Windows ARM64；用户明确要求现阶段不要额外跑 Linux 测试。游戏内仍由玩家操作。
 - SWEP 客户端预测目前未形成闭环：生产路径未建立 XGLUA_CL_ActiveSWEP、未完成状态回写及客户端脚本分发；旧宿主测试只能证明门控，不能视为预测实机通过。
-- 新增 addons/<name>/lua/weapons/*.lua 松散文件服务端发现与受保护加载；尚不支持 addon 依赖解析、客户端自动分发或热重载。M249 与沙漠之鹰插件已实现，仍需持续实机验证；原版参考 upstream/opfor:dlls/gearbox/m249.cpp，用户已安装的资源位于 D:\Program Files (x86)\Steam\steamapps\common\Half-Life\gearbox；不将原版游戏资源提交到仓库。
+- 支持 addons/<name>/lua/weapons/*.lua 与 lua/entities/*.lua 松散文件的服务端发现和受保护加载；尚不支持 addon 依赖解析、客户端自动分发或热重载。M249 与沙漠之鹰插件已实现，仍需持续实机验证；原版参考 upstream/opfor:dlls/gearbox/m249.cpp，用户已安装的资源位于 D:\Program Files (x86)\Steam\steamapps\common\Half-Life\gearbox；不将原版游戏资源提交到仓库。
+
+- 武器插件使用各自 lua/config.lua 配置、lua/weapons/ 行为和 lua/entities/ 实体；includeAddon(name, path) 从插件自己的 lua 目录加载，配置目前仅服务端可用。GoldSrc sprites/weapon_*.txt 仍负责 HUD 图标和准星；原版资源由用户本机提供。玩家已实机体验 M40A1，并反馈整体细节良好；个别伤害与边界仍需进一步验证。扳手与匕首已实机体验，用户反馈基本接近原版；近战命中桥接为 XGLua 扩展，SWEP Think 已接入服务端。

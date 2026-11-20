@@ -1,0 +1,5 @@
+4
+weapon 320 xgpw320 0 0 80 20
+weapon_s 320 xgpw320 0 20 80 20
+weapon 640 xgpw640 0 0 170 45
+weapon_s 640 xgpws640 0 0 170 45

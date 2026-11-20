@@ -461,6 +461,35 @@ int main()
 		CHECK( sentinelOk( L, baseline ), "module-api stack" );
 	}
 
+	// Reject incompatible rules before executing even the base scripts.
+	{
+		const GMFile files[] = {
+			{ "gamemodes/sp/sp.txt", "\"sp\" { \"rules\" \"singleplayer\" }" },
+			{ "gamemodes/sp/gamemode/shared.lua", "sp_ran = true" },
+			{ "gamemodes/sp/gamemode/init.lua", "" },
+			{ "gamemodes/legacy/legacy.txt", "\"legacy\" { }" },
+			{ "gamemodes/legacy/gamemode/shared.lua", "legacy_ran = true" },
+			{ "gamemodes/legacy/gamemode/init.lua", "" },
+		};
+		GMFS fs = { files, 6, 0 }; char err[256];
+		CHECK( XGLua_LoadGamemodeChain( L, GMMemRead, &fs, "sp", err, sizeof(err), "multiplayer" ) == XGLUA_GM_INCOMPATIBLE, "SP in MP refused" );
+		lua_getglobal( L, "sp_ran" ); CHECK( lua_isnil( L, -1 ), "incompatible script executed" ); lua_pop( L, 1 );
+		CHECK( XGLua_LoadGamemodeChain( L, GMMemRead, &fs, "sp", err, sizeof(err), "singleplayer" ) == XGLUA_GM_OK, "SP accepted" );
+		CHECK( XGLua_LoadGamemodeChain( L, GMMemRead, &fs, "legacy", err, sizeof(err), "singleplayer" ) == XGLUA_GM_INCOMPATIBLE, "legacy MP in SP refused" );
+		CHECK( XGLua_LoadGamemodeChain( L, GMMemRead, &fs, "legacy", err, sizeof(err), "multiplayer" ) == XGLUA_GM_OK, "legacy MP accepted" );
+		CHECK( sentinelOk( L, baseline ), "compatibility stack" );
+	}
+
+	// Exercise the shipped mode files and their full inheritance chain.
+	{
+		char err[256];
+		CHECK( XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, (void *)"../..", "campaign", err, sizeof(err), "singleplayer" ) == XGLUA_GM_OK, "shipped campaign" );
+		CHECK( XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, (void *)"../..", "campaign", err, sizeof(err), "multiplayer" ) == XGLUA_GM_INCOMPATIBLE, "campaign refused in multiplayer" );
+		CHECK( XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, (void *)"../..", "deathmatch", err, sizeof(err), "multiplayer" ) == XGLUA_GM_OK, "shipped deathmatch" );
+		CHECK( XGLua_LoadGamemodeChain( L, XGLua_ReadDiskRoot, (void *)"../..", "deathmatch", err, sizeof(err), "singleplayer" ) == XGLUA_GM_INCOMPATIBLE, "deathmatch refused in singleplayer" );
+		CHECK( sentinelOk( L, baseline ), "shipped modes stack" );
+	}
+
 	CHECK( sentinelOk( L, baseline ), "final sentinel" );
 	lua_close( L );
 	std::puts( "gamemode loading chain OK" );
