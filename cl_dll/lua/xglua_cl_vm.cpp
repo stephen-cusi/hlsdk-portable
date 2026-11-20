@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <algorithm>
 
 #include "hud.h"
 #include "cl_util.h"
@@ -24,9 +25,14 @@
 #include "lua/xglua_hook.h"
 // engine's cdll_int.h typedefs HSPRITE as int; the Windows SDK (minwindef.h)
 // redefines it as struct HSPRITE__ * - rename it away for this TU only.
+#ifdef _WIN32
 #define HSPRITE XGLUA_WIN_HSPRITE
-#include <windows.h> // FindFirstFileA for autorun scan
+#include <windows.h>
 #undef HSPRITE
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 #include "lua/xglua_vm_timer.h"
 extern "C" {
 #include "lualib.h"
@@ -101,8 +107,10 @@ static bool CL_LoadFileViaEngine( const char *relpath, std::string &out )
 	if( XGLua_CL_MemVFSFind( relpath, out ) )
 		return true;
 
-	char full[512];
-	snprintf( full, sizeof( full ), "lua/%s", relpath );
+	char full[512];
+
+	snprintf( full, sizeof( full ), "lua/%s", relpath );
+
 	int length = 0;
 	byte *data = gEngfuncs.COM_LoadFile( full, 5, &length );
 	if( !data || length < 0 )
@@ -139,25 +147,52 @@ static bool CL_RunScriptFile( lua_State *L, const char *relpath )
 
 static void CL_LoadAutorunFolder( lua_State *L, const char *relfolder )
 {
-#ifdef _WIN32
 	const char *gamedir = gEngfuncs.pfnGetGameDirectory ? gEngfuncs.pfnGetGameDirectory() : NULL;
 	if( !gamedir || !gamedir[0] ) return;
-	char mask[512];
-	snprintf( mask, sizeof( mask ), "%s/lua/%s/*.lua", gamedir, relfolder );
+	char dirpath[512];
+	if( snprintf( dirpath, sizeof( dirpath ), "%s/lua/%s", gamedir, relfolder ) >= (int)sizeof( dirpath ) ) return;
+	std::vector<std::string> files;
+#ifdef _WIN32
+	char mask[520];
+	if( snprintf( mask, sizeof( mask ), "%s/*", dirpath ) >= (int)sizeof( mask ) ) return;
 	WIN32_FIND_DATAA fd;
 	HANDLE h = FindFirstFileA( mask, &fd );
-	if( h == INVALID_HANDLE_VALUE ) return;
-	do
+	if( h != INVALID_HANDLE_VALUE )
 	{
-		if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) continue;
-		char rel[512];
-		snprintf( rel, sizeof( rel ), "%s/%s", relfolder, fd.cFileName );
-		CL_RunScriptFile( L, rel );
-	} while( FindNextFileA( h, &fd ) );
-	FindClose( h );
+		do {
+			if( fd.cFileName[0] == '.' || ( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) ) continue;
+			files.push_back( fd.cFileName );
+		} while( FindNextFileA( h, &fd ) );
+		FindClose( h );
+	}
 #else
-	(void)L; (void)relfolder;
+	DIR *dir = opendir( dirpath );
+	if( dir )
+	{
+		struct dirent *entry;
+		while( ( entry = readdir( dir ) ) != NULL )
+		{
+			if( entry->d_name[0] == '.' ) continue;
+			char path[1024];
+			if( snprintf( path, sizeof( path ), "%s/%s", dirpath, entry->d_name ) >= (int)sizeof( path ) ) continue;
+			struct stat st;
+			if( stat( path, &st ) == 0 && S_ISREG( st.st_mode ) ) files.push_back( entry->d_name );
+		}
+		closedir( dir );
+	}
 #endif
+	std::sort( files.begin(), files.end() );
+	for( size_t i = 0; i < files.size(); ++i )
+	{
+		const std::string &name = files[i];
+		if( name.size() <= 4 ) continue;
+		const char *ext = name.c_str() + name.size() - 4;
+		if( ext[0] != '.' || ( ext[1] != 'l' && ext[1] != 'L' ) ||
+			( ext[2] != 'u' && ext[2] != 'U' ) || ( ext[3] != 'a' && ext[3] != 'A' ) ) continue;
+		char rel[512];
+		if( snprintf( rel, sizeof( rel ), "%s/%s", relfolder, name.c_str() ) >= (int)sizeof( rel ) ) continue;
+		CL_RunScriptFile( L, rel );
+	}
 }
 
 //

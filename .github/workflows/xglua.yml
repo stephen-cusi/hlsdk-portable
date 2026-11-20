@@ -1,7 +1,7 @@
 name: xglua
 
-# XGLua server library CI: builds the xglua-luajit LuaJIT side-library for
-# every target platform, then builds the hlsdk server library against it.
+# XGLua dual library CI: builds the xglua-luajit LuaJIT side-library for
+# every target platform, then builds both hlsdk libraries against it.
 #
 # Windows keeps the GMod-style split lua_shared.dll (import lib + dll next
 # to xash3d.exe). On Android LuaJIT is linked STATICALLY into the server
@@ -49,6 +49,8 @@ jobs:
     steps:
       - name: Checkout hlsdk
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Checkout LuaJIT fork
         uses: actions/checkout@v6
         with:
@@ -75,17 +77,35 @@ jobs:
       - name: Build hlsdk server (ARM64)
         shell: pwsh
         run: |
-          cmake -B build -A ARM64 -DBUILD_CLIENT=OFF `
+          cmake -B build -A ARM64 -DBUILD_CLIENT=ON `
             -DXGLUA_LUAJIT_DIR="$env:GITHUB_WORKSPACE/xglua-luajit"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target server
+          cmake --build build --config Release --target server client
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run host regression tests (windows-arm64)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
+          cd /d "%GITHUB_WORKSPACE%\tests\xglua"
+          copy /y "%GITHUB_WORKSPACE%\xglua-luajit\dist\arm64\lua_shared.dll" . >nul
+          for %%t in (cl_swep_meta_test cl_ui_vgui_test npc_registry_test) do (
+            cl /nologo /MD /EHsc /std:c++17 /I"%GITHUB_WORKSPACE%\xglua-luajit\src" /I"%GITHUB_WORKSPACE%\common" /I"%GITHUB_WORKSPACE%\dlls" /I"%GITHUB_WORKSPACE%\cl_dll" "%%t.cpp" "%GITHUB_WORKSPACE%\xglua-luajit\dist\arm64\lua_shared.lib" /Fe:"%%t.exe"
+            if errorlevel 1 exit /b 1
+          )
+          cl /nologo /MD /EHsc /std:c++17 /I"%GITHUB_WORKSPACE%\xglua-luajit\src" /I"%GITHUB_WORKSPACE%\common" /I"%GITHUB_WORKSPACE%\dlls" /I"%GITHUB_WORKSPACE%\cl_dll" cl_predict_guard_test.cpp "%GITHUB_WORKSPACE%\cl_dll\lua\xglua_cl_predict.cpp" "%GITHUB_WORKSPACE%\xglua-luajit\dist\arm64\lua_shared.lib" /Fe:cl_predict_guard_test.exe
+          if errorlevel 1 exit /b 1
+          for %%t in (cl_predict_guard_test cl_swep_meta_test cl_ui_vgui_test npc_registry_test) do (
+            "%%t.exe"
+            if errorlevel 1 exit /b 1
+          )
       - name: Upload server (windows-arm64)
         uses: actions/upload-artifact@v5
         with:
           name: xglua-server-windows-arm64
           path: |
             build/dlls/Release/*.dll
+            build/cl_dll/Release/*.dll
             lua/
             gamemodes/
             cfg/
@@ -95,6 +115,8 @@ jobs:
     steps:
       - name: Checkout hlsdk
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Checkout LuaJIT fork
         uses: actions/checkout@v6
         with:
@@ -121,14 +143,15 @@ jobs:
       - name: Build hlsdk server (x64)
         shell: cmd
         run: |
-          cmake -B build -A x64 -DBUILD_CLIENT=OFF -D64BIT=ON -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
-          cmake --build build --config Release --target server
+          cmake -B build -A x64 -DBUILD_CLIENT=ON -D64BIT=ON -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
+          cmake --build build --config Release --target server client
       - name: Upload server (windows-x64)
         uses: actions/upload-artifact@v5
         with:
           name: xglua-server-windows-x64
           path: |
             build/dlls/Release/*.dll
+            build/cl_dll/Release/*.dll
             lua/
             gamemodes/
             cfg/
@@ -138,6 +161,8 @@ jobs:
     steps:
       - name: Checkout hlsdk
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Checkout LuaJIT fork
         uses: actions/checkout@v6
         with:
@@ -166,14 +191,15 @@ jobs:
         run: |
           rem x86 Windows BUILDARCH is empty in LibraryNaming: artifacts go to
           rem dist\ root, which the CMake lookup above already matches.
-          cmake -B build -A Win32 -DBUILD_CLIENT=OFF -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
-          cmake --build build --config Release --target server
+          cmake -B build -A Win32 -DBUILD_CLIENT=ON -DXGLUA_LUAJIT_DIR="%GITHUB_WORKSPACE%/xglua-luajit"
+          cmake --build build --config Release --target server client
       - name: Upload server (windows-x86)
         uses: actions/upload-artifact@v5
         with:
           name: xglua-server-windows-x86
           path: |
             build/dlls/Release/*.dll
+            build/cl_dll/Release/*.dll
             lua/
             gamemodes/
             cfg/
@@ -186,6 +212,8 @@ jobs:
     steps:
       - name: Checkout hlsdk
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Checkout LuaJIT fork
         uses: actions/checkout@v6
         with:
@@ -216,15 +244,17 @@ jobs:
           path: xglua-luajit/dist/${{ matrix.arch }}/
       - name: Build hlsdk server
         run: |
-          cmake -B build -DBUILD_CLIENT=OFF \
+          cmake -B build -DBUILD_CLIENT=ON \
             -D64BIT=${{ matrix.arch == 'amd64' && 'ON' || 'OFF' }} \
             -DXGLUA_LUAJIT_DIR="$GITHUB_WORKSPACE/xglua-luajit"
-          cmake --build build --target server --parallel 2
+          cmake --build build --target server client --parallel 2
       - name: Upload server (linux-${{ matrix.arch }})
         uses: actions/upload-artifact@v5
         with:
           name: xglua-server-linux-${{ matrix.arch }}
-          path: build/dlls/*.so
+          path: |
+            build/dlls/*.so
+            build/cl_dll/*.so
 
   android:
     runs-on: ubuntu-24.04
@@ -244,6 +274,8 @@ jobs:
     steps:
       - name: Checkout hlsdk
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Checkout LuaJIT fork
         uses: actions/checkout@v6
         with:
@@ -296,11 +328,13 @@ jobs:
             -DCMAKE_SYSTEM_VERSION=21 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
-            -DBUILD_CLIENT=OFF \
+            -DBUILD_CLIENT=ON \
             -DXGLUA_LUAJIT_DIR="$GITHUB_WORKSPACE/xglua-luajit"
-          cmake --build build --target server --parallel 2
+          cmake --build build --target server client --parallel 2
       - name: Upload server (android-${{ matrix.abi }})
         uses: actions/upload-artifact@v5
         with:
           name: xglua-server-android-${{ matrix.abi }}
-          path: build/dlls/*.so
+          path: |
+            build/dlls/*.so
+            build/cl_dll/*.so
