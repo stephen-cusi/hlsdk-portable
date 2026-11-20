@@ -190,6 +190,8 @@ void CLuaMonster::TraceAttack( entvars_t *pevAttacker, float flDamage, Vector ve
 void CLuaMonster::PlayActivity( int activity )
 {
 	int seq = LookupActivity( activity );
+	if( seq < 0 && activity == ACT_RUN )
+		seq = LookupActivity( ACT_WALK ); // models without RUN: fall back to WALK
 	if( seq >= 0 && pev->sequence != seq )
 	{
 		pev->sequence = seq;
