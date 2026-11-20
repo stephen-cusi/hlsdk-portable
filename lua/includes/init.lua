@@ -32,6 +32,10 @@ include( "includes/modules/net.lua" )
 include( "includes/modules/nwvar.lua" )
 if CLIENT then
 	include( "includes/modules/draw.lua" )
+	include( "includes/modules/vgui.lua" )
+end
+if SERVER then
+	include( "includes/modules/npc.lua" )
 end
 
 -- Extensions (add functions onto the standard libraries)

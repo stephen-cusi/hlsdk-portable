@@ -453,6 +453,11 @@ static int ents_Create( lua_State *L )
 		CBaseEntity *pEnt = XGLua_SpawnLuaEntity( cls, Vector( 0, 0, 0 ) );
 		pent = pEnt ? pEnt->edict() : NULL;
 	}
+	else if( XGLua_IsLuaNPC( cls ) )
+	{
+		CBaseEntity *pEnt = XGLua_SpawnLuaNPC( cls, Vector( 0, 0, 0 ) );
+		pent = pEnt ? pEnt->edict() : NULL;
+	}
 	else
 	{
 		pent = CREATE_NAMED_ENTITY( MAKE_STRING( cls ) );

@@ -657,6 +657,7 @@ void XGLua_Startup( void )
 	XGLua_RegisterWeaponLibs( L );
 	XGLua_RegisterConsole( L );
 	XGLua_RegisterNetLibs( L );
+	XGLua_RegisterNPCLibs( L );
 
 	// 1. core Lua layer (init.lua loads modules + extensions + enum)
 	if( !XGLua_RunCoreInit( &g_xglua_L, L, XGLua_ReadEngineScript, g_szGameDir, XGLua_ReportError ) )
@@ -697,6 +698,8 @@ void XGLua_Startup( void )
 	// 5. scripted entities — single files and <name>/init.lua folders
 	XGLua_LoadEntitiesFolder( L );
 	XGLua_BuildEntityCache( L );
+	XGLua_LoadFolder( L, "npcs", false, "NPC" );
+	XGLua_BuildNPCCache( L );
 
 	ALERT( at_console, "[XGLua] scripts loaded, waiting for ServerActivate\n" );
 }
@@ -713,6 +716,7 @@ void XGLua_Shutdown( void )
 {
 	XGLua_ClearWeaponTracking();
 	XGLua_ClearEntityCache();
+	XGLua_ClearNPCCache();
 	XGLua_NetShutdown();
 	if( !g_xglua_L )
 		return;

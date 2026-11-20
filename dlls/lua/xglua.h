@@ -62,7 +62,15 @@ int XGLua_EntityTakeDamage( CBaseEntity *victim, entvars_t *pevInflictor, entvar
 CBaseEntity *XGLua_SpawnLuaEntity( const char *classname, const Vector &origin );
 BOOL XGLua_IsLuaEntity( const char *classname );
 void XGLua_GetSENTRegistry( lua_State *L );
-void XGLua_BuildEntityCache( lua_State *L );
+void XGLua_BuildEntityCache( lua_State *L );
+//
+// Scripted NPCs (CLuaMonster - xglua_monster.cpp)
+//
+CBaseEntity *XGLua_SpawnLuaNPC( const char *classname, const Vector &origin );
+BOOL XGLua_IsLuaNPC( const char *classname );
+void XGLua_RegisterNPCLibs( lua_State *L );
+void XGLua_BuildNPCCache( lua_State *L );
+void XGLua_ClearNPCCache( void );
 //
 // Networking (M3 — xglua_net_server.cpp)
 //
