@@ -19,6 +19,7 @@
 #include "cbase.h"
 #include "monsters.h"
 #include "basemonster.h"
+#include "weapons.h"
 #include "xglua.h"
 #include "xglua_safe.h"
 #include "xglua_sound_precache.h"
@@ -86,6 +87,9 @@ public:
 	char m_szLuaClass[64];
 	int m_iClassify;
 	float m_flLuaNextThink;
+	float m_flCorpseFadeDelay;
+	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
+	void PlayActivity( int activity );
 
 	void Spawn( void );
 	void Precache( void );
@@ -170,6 +174,30 @@ static float CallNPCMethod( CLuaMonster *npc, const char *method, int extraArgs 
 	return ctx.outThinkDelay;
 }
 
+void CLuaMonster::TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType )
+{
+	if( pev->takedamage )
+	{
+		if( m_bloodColor != DONT_BLEED )
+		{
+			SpawnBlood( ptr->vecEndPos, m_bloodColor, flDamage );
+			TraceBleed( flDamage, vecDir, ptr, bitsDamageType );
+		}
+		AddMultiDamage( pevAttacker, this, flDamage, bitsDamageType );
+	}
+}
+
+void CLuaMonster::PlayActivity( int activity )
+{
+	int seq = LookupActivity( activity );
+	if( seq >= 0 && pev->sequence != seq )
+	{
+		pev->sequence = seq;
+		pev->frame = 0;
+		ResetSequenceInfo();
+	}
+}
+
 void CLuaMonster::InitFromCache( const char *classname )
 {
 	strncpy( m_szLuaClass, classname, sizeof( m_szLuaClass ) - 1 );
@@ -182,6 +210,7 @@ void CLuaMonster::InitFromCache( const char *classname )
 	pev->max_health = pev->health;
 	pev->yaw_speed = info ? info->yawSpeed : 180.0f;
 	m_flLuaNextThink = 0.0f;
+	m_flCorpseFadeDelay = 6.0f;
 }
 
 void CLuaMonster::Precache( void )
@@ -229,6 +258,19 @@ void CLuaMonster::MonsterThink( void )
 			m_flLuaNextThink = gpGlobals->time + delay;
 		}
 	}
+	else if( pev->deadflag == DEAD_DYING )
+	{
+		if( m_fSequenceFinished )
+		{
+			pev->deadflag = DEAD_DEAD;
+			StopAnimation();
+			if( m_flCorpseFadeDelay > 0.0f )
+			{
+				SetThink( &CBaseEntity::SUB_StartFadeOut );
+				pev->nextthink = gpGlobals->time + m_flCorpseFadeDelay;
+			}
+		}
+	}
 }
 
 int CLuaMonster::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
@@ -242,9 +284,17 @@ int CLuaMonster::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 
 void CLuaMonster::Killed( entvars_t *pevAttacker, int iGib )
 {
-	pev->deadflag = DEAD_DEAD;
+	if( pev->deadflag != DEAD_NO )
+		return;
+
+	pev->deadflag = DEAD_DYING;
 	pev->solid = SOLID_NOT;
 	pev->takedamage = DAMAGE_NO;
+	pev->movetype = MOVETYPE_TOSS;
+
+	// Default to standard death activity; Lua OnKilled can override via SetSequence/SetActivity
+	PlayActivity( ACT_DIESIMPLE );
+
 	edict_t *att = pevAttacker ? ENT( pevAttacker ) : NULL;
 	CallNPCMethod( this, "OnKilled", 2, att, NULL );
 }
@@ -397,6 +447,30 @@ static int NPC_SetBloodColor( lua_State *L )
 	return 0;
 }
 
+static int NPC_LookupSequence( lua_State *L )
+{
+	CLuaMonster *npc = NPCFromLua( L, 1 );
+	const char *label = luaL_checkstring( L, 2 );
+	lua_pushinteger( L, npc->LookupSequence( label ) );
+	return 1;
+}
+
+static int NPC_LookupActivity( lua_State *L )
+{
+	CLuaMonster *npc = NPCFromLua( L, 1 );
+	int act = (int)luaL_checkinteger( L, 2 );
+	lua_pushinteger( L, npc->LookupActivity( act ) );
+	return 1;
+}
+
+static int NPC_SetActivity( lua_State *L )
+{
+	CLuaMonster *npc = NPCFromLua( L, 1 );
+	int act = (int)luaL_checkinteger( L, 2 );
+	npc->PlayActivity( act );
+	return 0;
+}
+
 void XGLua_RegisterNPCLibs( lua_State *L )
 {
 	luaL_getmetatable( L, "XGLua_Entity" );
@@ -417,6 +491,9 @@ void XGLua_RegisterNPCLibs( lua_State *L )
 			{ "GetEnemy",           NPC_GetEnemy },
 			{ "SetClassify",        NPC_SetClassify },
 			{ "SetBloodColor",      NPC_SetBloodColor },
+		{ "LookupSequence",     NPC_LookupSequence },
+		{ "LookupActivity",     NPC_LookupActivity },
+		{ "SetActivity",        NPC_SetActivity },
 			{ NULL, NULL }
 		};
 		for( const luaL_Reg *f = npcmeta; f->name; ++f )
