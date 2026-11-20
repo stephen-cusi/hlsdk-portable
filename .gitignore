@@ -45,3 +45,7 @@ local.properties
 *.log
 
 /build-migrated/
+
+# Local agent instructions
+AGENTS.md
+**/AGENTS.md
